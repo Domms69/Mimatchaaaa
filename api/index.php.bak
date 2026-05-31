@@ -1,0 +1,463 @@
+<?php
+/**
+ * MiMatcha/SIMBADA API Handler
+ * Full CRUD API for frontend
+ */
+
+// Clear OPcache to ensure fresh code
+if (function_exists('opcache_reset')) {
+    opcache_reset();
+}
+
+header('Content-Type: application/json');
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE');
+header('Access-Control-Allow-Headers: Content-Type');
+
+require_once '../config.php';
+
+
+
+$action = $_GET['action'] ?? $_POST['action']
+// DEBUG: Log action value
+error_log("Action received: " . var_export(, true));
+ ?? '';
+
+// Login handler
+if ($action === 'login') {
+    $data = json_decode(file_get_contents('php://input'), true);
+    $email = $data['email'] ?? '';
+    $password = $data['password'] ?? '';
+    
+    $stmt = $conn->prepare("SELECT * FROM users WHERE email = ? AND password = ?");
+    $stmt->bind_param("ss", $email, $password);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    
+    if ($row = $result->fetch_assoc()) {
+        echo json_encode([
+            'success' => true,
+            'user' => [
+                'id' => $row['id'],
+                'email' => $row['email'],
+                'name' => $row['nama'],
+                'role' => $row['role']
+            ]
+        ]);
+    } else {
+        echo json_encode(['success' => false, 'error' => 'Invalid credentials']);
+    }
+    exit;
+}
+
+// Get products
+if ($action === 'get_products') {
+    $result = $conn->query("SELECT * FROM produk ORDER BY kategori, nama_produk");
+    echo json_encode($result->fetch_all(MYSQLI_ASSOC));
+    exit;
+}
+
+// Get single product
+if ($action === 'get_product') {
+    $id = $_GET['id'] ?? 0;
+    $stmt = $conn->prepare("SELECT * FROM produk WHERE id_produk = ?");
+    $stmt->bind_param("i", $id);
+    $stmt->execute();
+    echo json_encode($stmt->get_result()->fetch_assoc());
+    exit;
+}
+
+// Add product
+if ($action === 'add_product') {
+    $data = json_decode(file_get_contents('php://input'), true);
+    $stmt = $conn->prepare("INSERT INTO produk (nama_produk, harga, stok, kategori, deskripsi, gambar) VALUES (?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param("sdisss", $data['nama'], $data['harga'], $data['stok'], $data['kategori'], $data['deskripsi'], $data['gambar']);
+    if ($stmt->execute()) {
+        echo json_encode(['success' => true, 'id' => $conn->insert_id]);
+    } else {
+        echo json_encode(['success' => false, 'error' => $conn->error]);
+    }
+    exit;
+}
+
+// Update product
+if ($action === 'update_product') {
+    $data = json_decode(file_get_contents('php://input'), true);
+    $stmt = $conn->prepare("UPDATE produk SET nama_produk=?, harga=?, stok=?, kategori=?, deskripsi=?, gambar=? WHERE id_produk=?");
+    $stmt->bind_param("sdisssi", $data['nama'], $data['harga'], $data['stok'], $data['kategori'], $data['deskripsi'], $data['gambar'], $data['id']);
+    echo json_encode(['success' => $stmt->execute()]);
+    exit;
+}
+
+// Delete product
+if ($action === 'delete_product') {
+    $id = $_GET['id'] ?? 0;
+    $stmt = $conn->prepare("DELETE FROM produk WHERE id_produk = ?");
+    $stmt->bind_param("i", $id);
+    echo json_encode(['success' => $stmt->execute()]);
+    exit;
+}
+
+// Get customers
+if ($action === 'get_customers') {
+    $result = $conn->query("SELECT * FROM pelanggan ORDER BY nama");
+    echo json_encode($result->fetch_all(MYSQLI_ASSOC));
+    exit;
+}
+
+// Add customer
+if ($action === 'add_customer') {
+    $data = json_decode(file_get_contents('php://input'), true);
+    $stmt = $conn->prepare("INSERT INTO pelanggan (nama, alamat, nomor_telepon, email) VALUES (?, ?, ?, ?)");
+    $stmt->bind_param("ssss", $data['nama'], $data['alamat'], $data['telepon'], $data['email']);
+    echo json_encode(['success' => $stmt->execute(), 'id' => $conn->insert_id]);
+    exit;
+}
+
+// Update customer
+if ($action === 'update_customer') {
+    $data = json_decode(file_get_contents('php://input'), true);
+    $stmt = $conn->prepare("UPDATE pelanggan SET nama=?, alamat=?, nomor_telepon=?, email=? WHERE id_pelanggan=?");
+    $stmt->bind_param("ssssi", $data['nama'], $data['alamat'], $data['telepon'], $data['email'], $data['id']);
+    echo json_encode(['success' => $stmt->execute()]);
+    exit;
+}
+
+// Delete customer
+if ($action === 'delete_customer') {
+    $id = $_GET['id'] ?? 0;
+    $stmt = $conn->prepare("DELETE FROM pelanggan WHERE id_pelanggan = ?");
+    $stmt->bind_param("i", $id);
+    echo json_encode(['success' => $stmt->execute()]);
+    exit;
+}
+
+// Get orders
+if ($action === 'get_orders') {
+    $result = $conn->query("
+        SELECT p.*, pel.nama as nama_pelanggan 
+        FROM pesanan p 
+        LEFT JOIN pelanggan pel ON p.id_pelanggan = pel.id_pelanggan 
+        ORDER BY p.tanggal_pesanan DESC
+    ");
+    echo json_encode($result->fetch_all(MYSQLI_ASSOC));
+    exit;
+}
+
+// Get order details
+if ($action === 'get_order_details') {
+    $id = $_GET['id'] ?? 0;
+    $result = $conn->query("
+        SELECT dp.*, pr.nama_produk 
+        FROM detail_pesanan dp 
+        JOIN produk pr ON dp.id_produk = pr.id_produk 
+        WHERE dp.id_pesanan = $id
+    ");
+    echo json_encode($result->fetch_all(MYSQLI_ASSOC));
+    exit;
+}
+
+// Create order (checkout)
+if ($action === 'create_order') {
+    $data = json_decode(file_get_contents('php://input'), true);
+    
+    $conn->begin_transaction();
+    try {
+        // Handle NULL customer - use Walk-in Customer
+        $id_pelanggan = $data['id_pelanggan'] ?? null;
+        
+        if (!$id_pelanggan || $id_pelanggan === 'null') {
+            // Get or create Walk-in Customer
+            $walkInResult = $conn->query("SELECT id_pelanggan FROM pelanggan WHERE email = 'walkin@mimatcha.id' LIMIT 1");
+            if ($walkInResult && $walkInResult->num_rows > 0) {
+                $id_pelanggan = $walkInResult->fetch_assoc()['id_pelanggan'];
+            } else {
+                // Create Walk-in Customer if not exists
+                $conn->query("INSERT INTO pelanggan (nama, alamat, nomor_telepon, email) VALUES ('Walk-in Customer', '-', '-', 'walkin@mimatcha.id')");
+                $id_pelanggan = $conn->insert_id;
+            }
+        }
+        
+        $stmt = $conn->prepare("INSERT INTO pesanan (id_pelanggan, tanggal_pesanan, total_pembayaran, status_pesanan, metode_pembayaran, kasir) VALUES (?, ?, ?, ?, ?, ?)");
+        $tanggal = date('Y-m-d');
+        $metode = $data['metode_pembayaran'] ?? 'pending';
+        $kasir = $data['kasir'] ?? 'Kasir';
+        $status = $data['status'] ?? 'pending';
+        $stmt->bind_param("isdsss", $id_pelanggan, $tanggal, $data['total'], $status, $metode, $kasir);
+        $stmt->execute();
+        
+        $pesanan_id = $conn->insert_id;
+        
+        foreach ($data['items'] as $item) {
+            $stmt2 = $conn->prepare("INSERT INTO detail_pesanan (id_pesanan, id_produk, jumlah_produk, harga_satuan, subtotal) VALUES (?, ?, ?, ?, ?)");
+            $stmt2->bind_param("iiidd", $pesanan_id, $item['id_produk'], $item['jumlah'], $item['harga'], $item['subtotal']);
+            $stmt2->execute();
+            
+            $conn->query("UPDATE produk SET stok = stok - " . $item['jumlah'] . " WHERE id_produk = " . $item['id_produk']);
+        }
+        
+        $conn->commit();
+        echo json_encode(['success' => true, 'id' => $pesanan_id]);
+    } catch (Exception $e) {
+        $conn->rollback();
+        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+// Update order status
+if ($action === 'update_order_status') {
+    $data = json_decode(file_get_contents('php://input'), true);
+    $stmt = $conn->prepare("UPDATE pesanan SET status_pesanan = ? WHERE id_pesanan = ?");
+    $stmt->bind_param("si", $data['status'], $data['id']);
+    echo json_encode(['success' => $stmt->execute()]);
+    exit;
+}
+
+// Get dashboard stats
+if ($action === 'get_dashboard_stats') {
+    $today = date('Y-m-d');
+    $month = date('Y-m');
+    
+    $pendapatan_hari_ini = $conn->query("SELECT COALESCE(SUM(total_pembayaran), 0) as total FROM pesanan WHERE tanggal_pesanan = '$today' AND status_pesanan = 'lunas'")->fetch_assoc()['total'];
+    
+    $pendapatan_bulan = $conn->query("SELECT COALESCE(SUM(total_pembayaran), 0) as total FROM pesanan WHERE tanggal_pesanan LIKE '$month%' AND status_pesanan = 'lunas'")->fetch_assoc()['total'];
+    
+    $total_pesanan = $conn->query("SELECT COUNT(*) as total FROM pesanan WHERE tanggal_pesanan = '$today'")->fetch_assoc()['total'];
+    
+    $total_pelanggan = $conn->query("SELECT COUNT(*) as total FROM pelanggan")->fetch_assoc()['total'];
+    
+    $pesanan_terbaru = $conn->query("
+        SELECT p.*, pel.nama as nama_pelanggan 
+        FROM pesanan p 
+        LEFT JOIN pelanggan pel ON p.id_pelanggan = pel.id_pelanggan 
+        ORDER BY p.tanggal_pesanan DESC LIMIT 5
+    ")->fetch_all(MYSQLI_ASSOC);
+    
+    $produk_terlaris = $conn->query("
+        SELECT pr.nama_produk, SUM(dp.jumlah_produk) as total_terjual, SUM(dp.subtotal) as total_pendapatan
+        FROM detail_pesanan dp
+        JOIN produk pr ON dp.id_produk = pr.id_produk
+        GROUP BY dp.id_produk
+        ORDER BY total_terjual DESC
+        LIMIT 5
+    ")->fetch_all(MYSQLI_ASSOC);
+    
+    echo json_encode([
+        'pendapatan_hari_ini' => $pendapatan_hari_ini,
+        'pendapatan_bulan' => $pendapatan_bulan,
+        'total_pesanan_hari_ini' => $total_pesanan,
+        'total_pelanggan' => $total_pelanggan,
+        'pesanan_terbaru' => $pesanan_terbaru,
+        'produk_terlaris' => $produk_terlaris
+    ]);
+    exit;
+}
+
+// Get analytics
+if ($action === 'get_analytics') {
+    $type = $_GET['type'] ?? 'weekly';
+    
+    if ($type === 'weekly') {
+        $start = date('Y-m-d', strtotime('-7 days'));
+    } elseif ($type === 'monthly') {
+        $start = date('Y-m-01');
+    } else {
+        $start = date('Y-01-01');
+    }
+    
+    $penjualan = $conn->query("
+        SELECT DATE(tanggal_pesanan) as date, SUM(total_pembayaran) as total, COUNT(*) as jumlah
+        FROM pesanan
+        WHERE tanggal_pesanan >= '$start' AND status_pesanan = 'lunas'
+        GROUP BY DATE(tanggal_pesanan)
+        ORDER BY date
+    ")->fetch_all(MYSQLI_ASSOC);
+    
+    $kategori = $conn->query("
+        SELECT pr.kategori, SUM(dp.subtotal) as total
+        FROM detail_pesanan dp
+        JOIN produk pr ON dp.id_produk = pr.id_produk
+        JOIN pesanan p ON dp.id_pesanan = p.id_pesanan
+        WHERE p.tanggal_pesanan >= '$start' AND p.status_pesanan = 'lunas'
+        GROUP BY pr.kategori
+    ")->fetch_all(MYSQLI_ASSOC);
+    
+    echo json_encode([
+        'penjualan' => $penjualan,
+        'kategori' => $kategori
+    ]);
+    exit;
+}
+
+// Get inventory
+if ($action === 'get_inventory') {
+    $result = $conn->query("SELECT * FROM produk ORDER BY stok ASC");
+    echo json_encode($result->fetch_all(MYSQLI_ASSOC));
+    exit;
+}
+
+// Update stock
+if ($action === 'update_stock') {
+    $data = json_decode(file_get_contents('php://input'), true);
+    $stmt = $conn->prepare("UPDATE produk SET stok = ? WHERE id_produk = ?");
+    $stmt->bind_param("ii", $data['stok'], $data['id']);
+    echo json_encode(['success' => $stmt->execute()]);
+    exit;
+}
+
+// Get contracts
+if ($action === 'get_contracts') {
+    $result = $conn->query("SELECT * FROM kontrak ORDER BY tanggal_kontrak DESC");
+    echo json_encode($result->fetch_all(MYSQLI_ASSOC));
+    exit;
+}
+
+// Save contract
+if ($action === 'save_contract') {
+    $data = json_decode(file_get_contents('php://input'), true);
+    $stmt = $conn->prepare("INSERT INTO kontrak (id_pesanan, nama_pihak_kedua, email_pihak, tanggal_kontrak, masa_berlaku, nilai_kontrak, isi_kontrak, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'draft')");
+    $stmt->bind_param("issssds", $data['id_pesanan'], $data['nama'], $data['email'], $data['tanggal'], $data['masa'], $data['nilai'], $data['isi']);
+    echo json_encode(['success' => $stmt->execute(), 'id' => $conn->insert_id]);
+    exit;
+}
+
+// ==================== PAYMENT GATEWAY ENDPOINTS ====================
+
+// Create Payment (QRIS or Virtual Account)
+if ($action === 'create_payment') {
+    $data = json_decode(file_get_contents('php://input'), true);
+    
+    $id_pesanan = $data['id_pesanan'] ?? null;
+    $amount = $data['amount'] ?? 0;
+    $payment_method = $data['payment_method'] ?? 'qris';
+    $customer_name = $data['customer_name'] ?? 'Customer';
+    $customer_email = $data['customer_email'] ?? '';
+    $customer_phone = $data['customer_phone'] ?? '';
+    
+    if (!$id_pesanan || $amount <= 0) {
+        echo json_encode(['success' => false, 'error' => 'Invalid order ID or amount']);
+        exit;
+    }
+    
+    // Generate payment reference
+    $payment_reference = 'PAY-' . date('Ymd') . '-' . strtoupper(substr(md5(uniqid(rand(), true)), 0, 8));
+    
+    // For now, create a mock payment (will be replaced with actual Pakasir API call)
+    $expired_at = date('Y-m-d H:i:s', time() + 3600);
+    
+    if ($payment_method === 'qris') {
+        // Mock QRIS data
+        $qr_code_url = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' . urlencode($payment_reference);
+        $qr_string = $payment_reference;
+        
+        $stmt = $conn->prepare("INSERT INTO payment_transactions (id_pesanan, payment_reference, payment_method, amount, status, qr_code_url, qr_string, expired_at) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)");
+        $stmt->bind_param("issdsss", $id_pesanan, $payment_reference, $payment_method, $amount, $qr_code_url, $qr_string, $expired_at);
+        
+        if ($stmt->execute()) {
+            $conn->query("UPDATE pesanan SET payment_reference = '$payment_reference' WHERE id_pesanan = $id_pesanan");
+            
+            echo json_encode([
+                'success' => true,
+                'payment_reference' => $payment_reference,
+                'payment_method' => $payment_method,
+                'qr_code_url' => $qr_code_url,
+                'qr_string' => $qr_string,
+                'amount' => $amount,
+                'expired_at' => $expired_at
+            ]);
+        } else {
+            echo json_encode(['success' => false, 'error' => 'Failed to save payment transaction']);
+        }
+        
+    } elseif (strpos($payment_method, 'va_') === 0) {
+        // Mock Virtual Account data
+        $bank = str_replace('va_', '', $payment_method);
+        $va_number = '8808' . rand(1000000000, 9999999999);
+        $va_bank = strtoupper($bank);
+        
+        $stmt = $conn->prepare("INSERT INTO payment_transactions (id_pesanan, payment_reference, payment_method, amount, status, va_number, va_bank, expired_at) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)");
+        $stmt->bind_param("issdsss", $id_pesanan, $payment_reference, $payment_method, $amount, $va_number, $va_bank, $expired_at);
+        
+        if ($stmt->execute()) {
+            $conn->query("UPDATE pesanan SET payment_reference = '$payment_reference' WHERE id_pesanan = $id_pesanan");
+            
+            echo json_encode([
+                'success' => true,
+                'payment_reference' => $payment_reference,
+                'payment_method' => $payment_method,
+                'va_number' => $va_number,
+                'va_bank' => $va_bank,
+                'amount' => $amount,
+                'expired_at' => $expired_at
+            ]);
+        } else {
+            echo json_encode(['success' => false, 'error' => 'Failed to save payment transaction']);
+        }
+    }
+    exit;
+}
+
+// Check Payment Status
+if ($action === 'check_payment_status') {
+    $payment_reference = $_GET['payment_reference'] ?? '';
+    
+    if (!$payment_reference) {
+        echo json_encode(['success' => false, 'error' => 'Payment reference required']);
+        exit;
+    }
+    
+    $stmt = $conn->prepare("SELECT * FROM payment_transactions WHERE payment_reference = ?");
+    $stmt->bind_param("s", $payment_reference);
+    $stmt->execute();
+    $result = $stmt->get_result()->fetch_assoc();
+    
+    if (!$result) {
+        echo json_encode(['success' => false, 'error' => 'Payment not found']);
+        exit;
+    }
+    
+    echo json_encode([
+        'success' => true,
+        'payment' => $result
+    ]);
+    exit;
+}
+
+// Get Payment History
+if ($action === 'get_payment_history') {
+    $id_pesanan = $_GET['id_pesanan'] ?? null;
+    
+    if ($id_pesanan) {
+        $stmt = $conn->prepare("SELECT * FROM payment_transactions WHERE id_pesanan = ? ORDER BY created_at DESC");
+        $stmt->bind_param("i", $id_pesanan);
+        $stmt->execute();
+        $result = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    } else {
+        $result = $conn->query("SELECT pt.*, p.tanggal_pesanan, pel.nama as customer_name FROM payment_transactions pt LEFT JOIN pesanan p ON pt.id_pesanan = p.id_pesanan LEFT JOIN pelanggan pel ON p.id_pelanggan = pel.id_pelanggan ORDER BY pt.created_at DESC LIMIT 50")->fetch_all(MYSQLI_ASSOC);
+    }
+    
+    echo json_encode(['success' => true, 'payments' => $result]);
+    exit;
+}
+
+// Simulate Payment Success (for testing)
+if ($action === 'simulate_payment_success') {
+    $payment_reference = $_POST['payment_reference'] ?? '';
+    
+    if (!$payment_reference) {
+        echo json_encode(['success' => false, 'error' => 'Payment reference required']);
+        exit;
+    }
+    
+    $paid_at = date('Y-m-d H:i:s');
+    $conn->query("UPDATE payment_transactions SET status = 'paid', paid_at = '$paid_at' WHERE payment_reference = '$payment_reference'");
+    $conn->query("UPDATE pesanan SET status_pesanan = 'lunas' WHERE payment_reference = '$payment_reference'");
+    
+    echo json_encode(['success' => true, 'message' => 'Payment marked as paid']);
+    exit;
+}
+
+// Default response
+echo json_encode(['success' => false, 'error' => 'Unknown action']);
+

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Add Product - Fixed</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
+        button { padding: 10px 20px; margin: 10px 5px; cursor: pointer; font-size: 16px; }
+        .success { background: #4CAF50; color: white; border: none; }
+        .test { background: #2196F3; color: white; border: none; }
+        pre { background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }
+        .result { margin-top: 20px; }
+        h2 { color: #333; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Test Add Product API - Fixed Version</h1>
+    
+    <h2>Test 1: Add Product WITHOUT Image</h2>
+    <button class="test" onclick="testAddProductNoImage()">Test Add Product (No Image)</button>
+    
+    <h2>Test 2: Add Product WITH Small Image</h2>
+    <button class="test" onclick="testAddProductWithImage()">Test Add Product (With Image)</button>
+    
+    <h2>Test 3: Get All Products</h2>
+    <button class="test" onclick="testGetProducts()">Get All Products</button>
+    
+    <div class="result">
+        <h3>Result:</h3>
+        <pre id="result">Click a button to test...</pre>
+    </div>
+
+    <script>
+        const API_URL = 'http://testtt.test/api/index.php';
+
+        async function testAddProductNoImage() {
+            const data = {
+                nama_produk: 'Test Product ' + Date.now(),
+                harga: 25000,
+                stok: 20,
+                kategori: 'Beverages',
+                deskripsi: 'Test product without image'
+            };
+
+            try {
+                document.getElementById('result').textContent = 'Sending request...';
+                
+                const response = await fetch(API_URL + '?action=add_product', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+                document.getElementById('result').textContent = JSON.stringify(result, null, 2);
+                
+                if (result.success) {
+                    alert('✅ SUCCESS! Product added with ID: ' + result.id);
+                } else {
+                    alert('❌ ERROR: ' + result.error);
+                }
+            } catch (error) {
+                document.getElementById('result').textContent = '❌ ERROR: ' + error.message;
+                alert('❌ ERROR: ' + error.message);
+            }
+        }
+
+        async function testAddProductWithImage() {
+            // Small test image (1x1 pixel red PNG)
+            const smallImage = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
+            
+            const data = {
+                nama_produk: 'Test Product With Image ' + Date.now(),
+                harga: 30000,
+                stok: 15,
+                kategori: 'Beverages',
+                deskripsi: 'Test product with small image',
+                image: smallImage
+            };
+
+            try {
+                document.getElementById('result').textContent = 'Sending request with image...';
+                
+                const response = await fetch(API_URL + '?action=add_product', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+                document.getElementById('result').textContent = JSON.stringify(result, null, 2);
+                
+                if (result.success) {
+                    alert('✅ SUCCESS! Product with image added! ID: ' + result.id);
+                } else {
+                    alert('❌ ERROR: ' + result.error);
+                }
+            } catch (error) {
+                document.getElementById('result').textContent = '❌ ERROR: ' + error.message;
+                alert('❌ ERROR: ' + error.message);
+            }
+        }
+
+        async function testGetProducts() {
+            try {
+                document.getElementById('result').textContent = 'Fetching products...';
+                
+                const response = await fetch(API_URL + '?action=get_products');
+                const result = await response.json();
+                
+                document.getElementById('result').textContent = 
+                    'Total Products: ' + result.length + '\n\n' +
+                    'Last 3 Products:\n' +
+                    JSON.stringify(result.slice(0, 3), null, 2);
+                
+                alert('✅ Found ' + result.length + ' products');
+            } catch (error) {
+                document.getElementById('result').textContent = '❌ ERROR: ' + error.message;
+                alert('❌ ERROR: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html>
