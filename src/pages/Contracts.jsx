@@ -251,15 +251,17 @@ const Contracts = () => {
 
   return (
     <div className="contracts-page">
-      <header className="contracts-header">
-        <div className="header-info">
-          <h1>Contract Management</h1>
-          <p>Kelola kontrak bisnis MiMatcha</p>
+      <header className="main-header">
+        <div className="header-left">
+          <h1 className="page-title">Manajemen Kontrak</h1>
+          <p className="page-subtitle">Kelola kontrak bisnis MiMatcha</p>
         </div>
-        <button className="btn-add-contract" onClick={handleOpenAddModal}>
-          <Plus size={20} />
-          <span>Buat Kontrak</span>
-        </button>
+        <div className="header-right">
+          <button className="btn-add-contract" onClick={handleOpenAddModal}>
+            <Plus size={20} />
+            <span>Buat Kontrak</span>
+          </button>
+        </div>
       </header>
 
       <section className="contracts-stats">

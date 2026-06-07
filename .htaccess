@@ -1,0 +1,27 @@
+# =============================================================================
+# MiMatcha — Apache Configuration untuk SPA + PHP API
+# =============================================================================
+# Letakkan file ini di ROOT website (public_html/) bersama index.html
+# =============================================================================
+
+RewriteEngine On
+
+# 1. Jangan rewrite jika file/directory asli ada
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# 2. Jangan rewrite request ke /api/ — biar PHP handle sendiri
+RewriteCond %{REQUEST_URI} !^/api/
+
+# 3. Semua request lainnya dialihkan ke index.html (React Router SPA)
+RewriteRule ^ index.html [L]
+
+# Security: Blok akses ke file sensitif
+<FilesMatch "\.(env|git|md|bat|sh|bak)$">
+    Require all denied
+</FilesMatch>
+
+# Cache static assets
+<FilesMatch "\.(css|js|png|jpe?g|svg|ico)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+</FilesMatch>

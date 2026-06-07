@@ -7,12 +7,16 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies
 node_modules
+
+# Build output
 dist
 dist-ssr
+public/dist
 *.local
 
-# Editor directories and files
+# Editor
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -27,3 +31,15 @@ dist-ssr
 .env
 .env.local
 .env.*.local
+
+# Playwright
+.playwright-mcp/
+
+# Sisyphus
+.sisyphus/
+
+# Temporary project files
+*.bat
+*.pptx
+*.pdf
+mimatcha-deploy.zip

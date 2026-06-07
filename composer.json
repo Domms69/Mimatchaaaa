@@ -1,0 +1,17 @@
+{
+  "name": "mimatcha",
+  "description": "MiMatcha - Business Management System (POS, Contracts, Payments)",
+  "type": "project",
+  "require": {
+    "php": ">=8.1",
+    "ext-pdo_pgsql": "*"
+  },
+  "scripts": {
+    "post-install-cmd": [
+      "npm install && npm run build && cp -r dist/* public/dist/"
+    ]
+  },
+  "config": {
+    "optimize-autoloader": true
+  }
+}

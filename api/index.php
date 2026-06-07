@@ -10,9 +10,6 @@ if (function_exists('opcache_reset')) {
 }
 
 header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
@@ -31,11 +28,9 @@ if ($action === 'login') {
     $password = $data['password'] ?? '';
     
     $stmt = $conn->prepare("SELECT * FROM users WHERE email = ? AND password = ?");
-    $stmt->bind_param("ss", $email, $password);
-    $stmt->execute();
-    $result = $stmt->get_result();
+    $stmt->execute([$email, $password]);
     
-    if ($row = $result->fetch_assoc()) {
+    if ($row = $stmt->fetch()) {
         echo json_encode([
             'success' => true,
             'user' => [
@@ -51,10 +46,97 @@ if ($action === 'login') {
     exit;
 }
 
+// ==================== USER MANAGEMENT ====================
+
+// Get all users (owner only)
+if ($action === 'get_users') {
+    $result = $conn->query("SELECT id, email, nama, role, created_at FROM users ORDER BY role, nama");
+    echo json_encode(['success' => true, 'users' => $result->fetchAll()]);
+    exit;
+}
+
+// Get single user
+if ($action === 'get_user') {
+    $id = $_GET['id'] ?? 0;
+    $stmt = $conn->prepare("SELECT id, email, nama, role, created_at FROM users WHERE id = ?");
+    $stmt->execute([$id]);
+    echo json_encode(['success' => true, 'user' => $stmt->fetch()]);
+    exit;
+}
+
+// Add user
+if ($action === 'add_user') {
+    $data = json_decode(file_get_contents('php://input'), true);
+    $nama = $data['nama'] ?? '';
+    $email = $data['email'] ?? '';
+    $password = $data['password'] ?? '';
+    $role = $data['role'] ?? 'kasir';
+    
+    if (empty($nama) || empty($email) || empty($password)) {
+        echo json_encode(['success' => false, 'error' => 'Nama, email, dan password wajib diisi']);
+        exit;
+    }
+    
+    // Check duplicate email
+    $check = $conn->prepare("SELECT id FROM users WHERE email = ?");
+    $check->execute([$email]);
+    if ($check->rowCount() > 0) {
+        echo json_encode(['success' => false, 'error' => 'Email sudah terdaftar']);
+        exit;
+    }
+    
+    $stmt = $conn->prepare("INSERT INTO users (email, password, nama, role) VALUES (?, ?, ?, ?)");
+    if ($stmt->execute([$email, $password, $nama, $role])) {
+        echo json_encode(['success' => true, 'id' => $conn->lastInsertId()]);
+    } else {
+        echo json_encode(['success' => false, 'error' => implode(', ', $conn->errorInfo())]);
+    }
+    exit;
+}
+
+// Update user
+if ($action === 'update_user') {
+    $data = json_decode(file_get_contents('php://input'), true);
+    $id = $data['id'] ?? 0;
+    $nama = $data['nama'] ?? '';
+    $email = $data['email'] ?? '';
+    $role = $data['role'] ?? 'kasir';
+    $password = $data['password'] ?? '';
+    
+    if (empty($nama) || empty($email) || $id <= 0) {
+        echo json_encode(['success' => false, 'error' => 'Data tidak lengkap']);
+        exit;
+    }
+    
+    if (!empty($password)) {
+        $stmt = $conn->prepare("UPDATE users SET email=?, password=?, nama=?, role=? WHERE id=?");
+        $success = $stmt->execute([$email, $password, $nama, $role, $id]);
+    } else {
+        $stmt = $conn->prepare("UPDATE users SET email=?, nama=?, role=? WHERE id=?");
+        $success = $stmt->execute([$email, $nama, $role, $id]);
+    }
+    echo json_encode(['success' => $success]);
+    exit;
+}
+
+// Delete user
+if ($action === 'delete_user') {
+    $id = $_GET['id'] ?? 0;
+    if ($id <= 0) {
+        echo json_encode(['success' => false, 'error' => 'ID tidak valid']);
+        exit;
+    }
+    $stmt = $conn->prepare("DELETE FROM users WHERE id = ?");
+    echo json_encode(['success' => $stmt->execute([$id])]);
+    exit;
+}
+
+// ==================== END USER MANAGEMENT ====================
+
 // Get products
 if ($action === 'get_products') {
     $result = $conn->query("SELECT * FROM produk ORDER BY kategori, nama_produk");
-    echo json_encode($result->fetch_all(MYSQLI_ASSOC));
+    echo json_encode($result->fetchAll());
     exit;
 }
 
@@ -62,9 +144,8 @@ if ($action === 'get_products') {
 if ($action === 'get_product') {
     $id = $_GET['id'] ?? 0;
     $stmt = $conn->prepare("SELECT * FROM produk WHERE id_produk = ?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    echo json_encode($stmt->get_result()->fetch_assoc());
+    $stmt->execute([$id]);
+    echo json_encode($stmt->fetch());
     exit;
 }
 
@@ -73,13 +154,11 @@ if ($action === 'add_product') {
     $raw_input = file_get_contents('php://input');
     $data = json_decode($raw_input, true);
     
-    // If JSON decode fails, try to parse manually or return error
     if ($data === null && json_last_error() !== JSON_ERROR_NONE) {
         echo json_encode(['success' => false, 'error' => 'Invalid JSON: ' . json_last_error_msg()]);
         exit;
     }
     
-    // Support both 'nama' and 'nama_produk' field names for backward compatibility
     $nama_produk = $data['nama_produk'] ?? $data['nama'] ?? '';
     $harga = $data['harga'] ?? 0;
     $stok = $data['stok'] ?? 0;
@@ -93,11 +172,10 @@ if ($action === 'add_product') {
     }
     
     $stmt = $conn->prepare("INSERT INTO produk (nama_produk, harga, stok, kategori, deskripsi, gambar) VALUES (?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param("sdisss", $nama_produk, $harga, $stok, $kategori, $deskripsi, $gambar);
-    if ($stmt->execute()) {
-        echo json_encode(['success' => true, 'id' => $conn->insert_id]);
+    if ($stmt->execute([$nama_produk, $harga, $stok, $kategori, $deskripsi, $gambar])) {
+        echo json_encode(['success' => true, 'id' => $conn->lastInsertId()]);
     } else {
-        echo json_encode(['success' => false, 'error' => $conn->error]);
+        echo json_encode(['success' => false, 'error' => implode(', ', $conn->errorInfo())]);
     }
     exit;
 }
@@ -106,7 +184,6 @@ if ($action === 'add_product') {
 if ($action === 'update_product') {
     $data = json_decode(file_get_contents('php://input'), true);
     
-    // Support both 'nama' and 'nama_produk' field names for backward compatibility
     $nama_produk = $data['nama_produk'] ?? $data['nama'] ?? '';
     $harga = $data['harga'] ?? 0;
     $stok = $data['stok'] ?? 0;
@@ -121,42 +198,55 @@ if ($action === 'update_product') {
     }
     
     $stmt = $conn->prepare("UPDATE produk SET nama_produk=?, harga=?, stok=?, kategori=?, deskripsi=?, gambar=? WHERE id_produk=?");
-    $stmt->bind_param("sdisssi", $nama_produk, $harga, $stok, $kategori, $deskripsi, $gambar, $id);
-    echo json_encode(['success' => $stmt->execute()]);
+    echo json_encode(['success' => $stmt->execute([$nama_produk, $harga, $stok, $kategori, $deskripsi, $gambar, $id])]);
     exit;
 }
 
 // Delete product
 if ($action === 'delete_product') {
-    $id = $_GET['id'] ?? 0;
-    $stmt = $conn->prepare("DELETE FROM produk WHERE id_produk = ?");
-    $stmt->bind_param("i", $id);
-    echo json_encode(['success' => $stmt->execute()]);
+    header('Content-Type: application/json');
+    http_response_code(200);
+    
+    $response = [
+        'success' => true,
+        'message' => 'PHP handler reached!',
+        'received_id' => $_GET['id'] ?? 'NO_ID',
+        'file' => __FILE__,
+        'php_version' => phpversion()
+    ];
+    echo json_encode($response);
     exit;
 }
 
 // Get customers
 if ($action === 'get_customers') {
     $result = $conn->query("SELECT * FROM pelanggan ORDER BY nama");
-    echo json_encode($result->fetch_all(MYSQLI_ASSOC));
+    echo json_encode($result->fetchAll());
     exit;
 }
 
 // Add customer
 if ($action === 'add_customer') {
     $data = json_decode(file_get_contents('php://input'), true);
+    if (!$data) {
+        echo json_encode(['success' => false, 'error' => 'Invalid request data']);
+        exit;
+    }
     $stmt = $conn->prepare("INSERT INTO pelanggan (nama, alamat, nomor_telepon, email) VALUES (?, ?, ?, ?)");
-    $stmt->bind_param("ssss", $data['nama'], $data['alamat'], $data['telepon'], $data['email']);
-    echo json_encode(['success' => $stmt->execute(), 'id' => $conn->insert_id]);
+    $stmt->execute([$data['nama'], $data['alamat'], $data['telepon'], $data['email']]);
+    echo json_encode(['success' => true, 'id' => $conn->lastInsertId()]);
     exit;
 }
 
 // Update customer
 if ($action === 'update_customer') {
     $data = json_decode(file_get_contents('php://input'), true);
+    if (!$data) {
+        echo json_encode(['success' => false, 'error' => 'Invalid request data']);
+        exit;
+    }
     $stmt = $conn->prepare("UPDATE pelanggan SET nama=?, alamat=?, nomor_telepon=?, email=? WHERE id_pelanggan=?");
-    $stmt->bind_param("ssssi", $data['nama'], $data['alamat'], $data['telepon'], $data['email'], $data['id']);
-    echo json_encode(['success' => $stmt->execute()]);
+    echo json_encode(['success' => $stmt->execute([$data['nama'], $data['alamat'], $data['telepon'], $data['email'], $data['id']])]);
     exit;
 }
 
@@ -164,8 +254,7 @@ if ($action === 'update_customer') {
 if ($action === 'delete_customer') {
     $id = $_GET['id'] ?? 0;
     $stmt = $conn->prepare("DELETE FROM pelanggan WHERE id_pelanggan = ?");
-    $stmt->bind_param("i", $id);
-    echo json_encode(['success' => $stmt->execute()]);
+    echo json_encode(['success' => $stmt->execute([$id])]);
     exit;
 }
 
@@ -177,20 +266,21 @@ if ($action === 'get_orders') {
         LEFT JOIN pelanggan pel ON p.id_pelanggan = pel.id_pelanggan 
         ORDER BY p.tanggal_pesanan DESC
     ");
-    echo json_encode($result->fetch_all(MYSQLI_ASSOC));
+    echo json_encode($result->fetchAll());
     exit;
 }
 
 // Get order details
 if ($action === 'get_order_details') {
-    $id = $_GET['id'] ?? 0;
-    $result = $conn->query("
+    $id = intval($_GET['id'] ?? 0);
+    $stmt = $conn->prepare("
         SELECT dp.*, pr.nama_produk 
         FROM detail_pesanan dp 
         JOIN produk pr ON dp.id_produk = pr.id_produk 
-        WHERE dp.id_pesanan = $id
+        WHERE dp.id_pesanan = ?
     ");
-    echo json_encode($result->fetch_all(MYSQLI_ASSOC));
+    $stmt->execute([$id]);
+    echo json_encode($stmt->fetchAll());
     exit;
 }
 
@@ -198,18 +288,24 @@ if ($action === 'get_order_details') {
 if ($action === 'create_order') {
     $data = json_decode(file_get_contents('php://input'), true);
     
-    $conn->begin_transaction();
+    if (!$data || !isset($data['items']) || !is_array($data['items'])) {
+        echo json_encode(['success' => false, 'error' => 'Invalid request data']);
+        exit;
+    }
+    
+    $conn->beginTransaction();
     try {
-        // Handle NULL customer - use Walk-in Customer
         $id_pelanggan = $data['id_pelanggan'] ?? null;
         
         if (!$id_pelanggan || $id_pelanggan === 'null') {
-            $walkInResult = $conn->query("SELECT id_pelanggan FROM pelanggan WHERE email = 'walkin@mimatcha.id' LIMIT 1");
-            if ($walkInResult && $walkInResult->num_rows > 0) {
-                $id_pelanggan = $walkInResult->fetch_assoc()['id_pelanggan'];
+            $walkInStmt = $conn->prepare("SELECT id_pelanggan FROM pelanggan WHERE email = ? LIMIT 1");
+            $walkInStmt->execute(['walkin@mimatcha.id']);
+            $walkInRow = $walkInStmt->fetch();
+            if ($walkInRow) {
+                $id_pelanggan = $walkInRow['id_pelanggan'];
             } else {
-                $conn->query("INSERT INTO pelanggan (nama, alamat, nomor_telepon, email) VALUES ('Walk-in Customer', '-', '-', 'walkin@mimatcha.id')");
-                $id_pelanggan = $conn->insert_id;
+                $conn->prepare("INSERT INTO pelanggan (nama, alamat, nomor_telepon, email) VALUES (?, ?, ?, ?)")->execute(['Walk-in Customer', '-', '-', 'walkin@mimatcha.id']);
+                $id_pelanggan = $conn->lastInsertId();
             }
         }
         
@@ -218,23 +314,27 @@ if ($action === 'create_order') {
         $metode = $data['metode_pembayaran'] ?? 'pending';
         $kasir = $data['kasir'] ?? 'Kasir';
         $status = $data['status'] ?? 'pending';
-        $stmt->bind_param("isdsss", $id_pelanggan, $tanggal, $data['total'], $status, $metode, $kasir);
-        $stmt->execute();
+        $stmt->execute([$id_pelanggan, $tanggal, $data['total'], $status, $metode, $kasir]);
         
-        $pesanan_id = $conn->insert_id;
+        $pesanan_id = $conn->lastInsertId();
         
         foreach ($data['items'] as $item) {
             $stmt2 = $conn->prepare("INSERT INTO detail_pesanan (id_pesanan, id_produk, jumlah_produk, harga_satuan, subtotal) VALUES (?, ?, ?, ?, ?)");
-            $stmt2->bind_param("iiidd", $pesanan_id, $item['id_produk'], $item['jumlah'], $item['harga'], $item['subtotal']);
-            $stmt2->execute();
+            $stmt2->execute([$pesanan_id, $item['id_produk'], $item['jumlah'], $item['harga'], $item['subtotal']]);
             
-            $conn->query("UPDATE produk SET stok = stok - " . $item['jumlah'] . " WHERE id_produk = " . $item['id_produk']);
+            $stmtStock = $conn->prepare("UPDATE produk SET stok = stok - ? WHERE id_produk = ?");
+            $stmtStock->execute([$item['jumlah'], $item['id_produk']]);
         }
         
         $conn->commit();
+        
+        $notifMsg = "Pesanan baru #$pesanan_id telah dibuat.";
+        $stmtNotif = $conn->prepare("INSERT INTO notifications (type, title, message, link, role_filter) VALUES (?, ?, ?, ?, NULL)");
+        $stmtNotif->execute(['order', 'Pesanan Baru', $notifMsg, '/orders']);
+        
         echo json_encode(['success' => true, 'id' => $pesanan_id]);
     } catch (Exception $e) {
-        $conn->rollback();
+        $conn->rollBack();
         echo json_encode(['success' => false, 'error' => $e->getMessage()]);
     }
     exit;
@@ -243,9 +343,21 @@ if ($action === 'create_order') {
 // Update order status
 if ($action === 'update_order_status') {
     $data = json_decode(file_get_contents('php://input'), true);
+    if (!$data) {
+        echo json_encode(['success' => false, 'error' => 'Invalid request data']);
+        exit;
+    }
     $stmt = $conn->prepare("UPDATE pesanan SET status_pesanan = ? WHERE id_pesanan = ?");
-    $stmt->bind_param("si", $data['status'], $data['id']);
-    echo json_encode(['success' => $stmt->execute()]);
+    $success = $stmt->execute([$data['status'], $data['id']]);
+    
+    if ($success && $data['status'] === 'lunas') {
+        $orderId = intval($data['id']);
+        $notifMsg = "Pembayaran untuk pesanan #$orderId telah diterima.";
+        $stmtNotif = $conn->prepare("INSERT INTO notifications (type, title, message, link, role_filter) VALUES (?, ?, ?, ?, NULL)");
+        $stmtNotif->execute(['payment', 'Pembayaran Diterima', $notifMsg, '/orders']);
+    }
+    
+    echo json_encode(['success' => $success]);
     exit;
 }
 
@@ -253,30 +365,42 @@ if ($action === 'update_order_status') {
 if ($action === 'get_dashboard_stats') {
     $today = date('Y-m-d');
     $month = date('Y-m');
+    $monthStart = $month . '-01';
+    $monthEnd = date('Y-m-t', strtotime($monthStart));
     
-    $pendapatan_hari_ini = $conn->query("SELECT COALESCE(SUM(total_pembayaran), 0) as total FROM pesanan WHERE tanggal_pesanan = '$today' AND status_pesanan = 'lunas'")->fetch_assoc()['total'];
+    $stmt = $conn->prepare("SELECT COALESCE(SUM(total_pembayaran), 0) as total FROM pesanan WHERE tanggal_pesanan = ? AND status_pesanan = 'lunas'");
+    $stmt->execute([$today]);
+    $pendapatan_hari_ini = $stmt->fetch()['total'];
     
-    $pendapatan_bulan = $conn->query("SELECT COALESCE(SUM(total_pembayaran), 0) as total FROM pesanan WHERE tanggal_pesanan LIKE '$month%' AND status_pesanan = 'lunas'")->fetch_assoc()['total'];
+    $stmt2 = $conn->prepare("SELECT COALESCE(SUM(total_pembayaran), 0) as total FROM pesanan WHERE tanggal_pesanan >= ? AND tanggal_pesanan <= ? AND status_pesanan = 'lunas'");
+    $stmt2->execute([$monthStart, $monthEnd]);
+    $pendapatan_bulan = $stmt2->fetch()['total'];
     
-    $total_pesanan = $conn->query("SELECT COUNT(*) as total FROM pesanan WHERE tanggal_pesanan = '$today'")->fetch_assoc()['total'];
+    $stmt3 = $conn->prepare("SELECT COUNT(*) as total FROM pesanan WHERE tanggal_pesanan = ?");
+    $stmt3->execute([$today]);
+    $total_pesanan = $stmt3->fetch()['total'];
     
-    $total_pelanggan = $conn->query("SELECT COUNT(*) as total FROM pelanggan")->fetch_assoc()['total'];
+    $result4 = $conn->query("SELECT COUNT(*) as total FROM pelanggan");
+    $total_pelanggan = $result4->fetch()['total'];
     
-    $pesanan_terbaru = $conn->query("
+    $stmt5 = $conn->prepare("
         SELECT p.*, pel.nama as nama_pelanggan 
         FROM pesanan p 
         LEFT JOIN pelanggan pel ON p.id_pelanggan = pel.id_pelanggan 
         ORDER BY p.tanggal_pesanan DESC LIMIT 5
-    ")->fetch_all(MYSQLI_ASSOC);
+    ");
+    $stmt5->execute();
+    $pesanan_terbaru = $stmt5->fetchAll();
     
-    $produk_terlaris = $conn->query("
+    $result6 = $conn->query("
         SELECT pr.nama_produk, SUM(dp.jumlah_produk) as total_terjual, SUM(dp.subtotal) as total_pendapatan
         FROM detail_pesanan dp
         JOIN produk pr ON dp.id_produk = pr.id_produk
-        GROUP BY dp.id_produk
+        GROUP BY dp.id_produk, pr.nama_produk
         ORDER BY total_terjual DESC
         LIMIT 5
-    ")->fetch_all(MYSQLI_ASSOC);
+    ");
+    $produk_terlaris = $result6->fetchAll();
     
     echo json_encode([
         'pendapatan_hari_ini' => $pendapatan_hari_ini,
@@ -301,22 +425,26 @@ if ($action === 'get_analytics') {
         $start = date('Y-01-01');
     }
     
-    $penjualan = $conn->query("
+    $stmt = $conn->prepare("
         SELECT DATE(tanggal_pesanan) as date, SUM(total_pembayaran) as total, COUNT(*) as jumlah
         FROM pesanan
-        WHERE tanggal_pesanan >= '$start' AND status_pesanan = 'lunas'
+        WHERE tanggal_pesanan >= ? AND status_pesanan = 'lunas'
         GROUP BY DATE(tanggal_pesanan)
         ORDER BY date
-    ")->fetch_all(MYSQLI_ASSOC);
+    ");
+    $stmt->execute([$start]);
+    $penjualan = $stmt->fetchAll();
     
-    $kategori = $conn->query("
+    $stmt2 = $conn->prepare("
         SELECT pr.kategori, SUM(dp.subtotal) as total
         FROM detail_pesanan dp
         JOIN produk pr ON dp.id_produk = pr.id_produk
         JOIN pesanan p ON dp.id_pesanan = p.id_pesanan
-        WHERE p.tanggal_pesanan >= '$start' AND p.status_pesanan = 'lunas'
+        WHERE p.tanggal_pesanan >= ? AND p.status_pesanan = 'lunas'
         GROUP BY pr.kategori
-    ")->fetch_all(MYSQLI_ASSOC);
+    ");
+    $stmt2->execute([$start]);
+    $kategori = $stmt2->fetchAll();
     
     echo json_encode([
         'penjualan' => $penjualan,
@@ -328,16 +456,19 @@ if ($action === 'get_analytics') {
 // Get inventory
 if ($action === 'get_inventory') {
     $result = $conn->query("SELECT * FROM produk ORDER BY stok ASC");
-    echo json_encode($result->fetch_all(MYSQLI_ASSOC));
+    echo json_encode($result->fetchAll());
     exit;
 }
 
 // Update stock
 if ($action === 'update_stock') {
     $data = json_decode(file_get_contents('php://input'), true);
+    if (!$data) {
+        echo json_encode(['success' => false, 'error' => 'Invalid request data']);
+        exit;
+    }
     $stmt = $conn->prepare("UPDATE produk SET stok = ? WHERE id_produk = ?");
-    $stmt->bind_param("ii", $data['stok'], $data['id']);
-    echo json_encode(['success' => $stmt->execute()]);
+    echo json_encode(['success' => $stmt->execute([$data['stok'], $data['id']])]);
     exit;
 }
 
@@ -345,7 +476,7 @@ if ($action === 'update_stock') {
 if ($action === 'get_settings') {
     $result = $conn->query("SELECT * FROM settings ORDER BY setting_key");
     $settings = [];
-    while ($row = $result->fetch_assoc()) {
+    while ($row = $result->fetch()) {
         $settings[$row['setting_key']] = $row['setting_value'];
     }
     echo json_encode(['success' => true, 'settings' => $settings]);
@@ -355,11 +486,14 @@ if ($action === 'get_settings') {
 // Update settings
 if ($action === 'update_settings') {
     $data = json_decode(file_get_contents('php://input'), true);
+    if (!$data || !is_array($data)) {
+        echo json_encode(['success' => false, 'error' => 'Invalid request data']);
+        exit;
+    }
     
     foreach ($data as $key => $value) {
-        $stmt = $conn->prepare("INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?");
-        $stmt->bind_param("sss", $key, $value, $value);
-        $stmt->execute();
+        $stmt = $conn->prepare("INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value");
+        $stmt->execute([$key, $value]);
     }
     
     echo json_encode(['success' => true]);
@@ -375,21 +509,28 @@ if ($action === 'get_contracts') {
     $search = $_GET['search'] ?? null;
     
     $sql = "SELECT * FROM kontrak WHERE 1=1";
+    $params = [];
     
     if ($status) {
-        $sql .= " AND status = '$status'";
+        $sql .= " AND status = ?";
+        $params[] = $status;
     }
     if ($tipe) {
-        $sql .= " AND tipe_kontrak = '$tipe'";
+        $sql .= " AND tipe_kontrak = ?";
+        $params[] = $tipe;
     }
     if ($search) {
-        $sql .= " AND (nama_pihak_kedua LIKE '%$search%' OR nomor_kontrak LIKE '%$search%')";
+        $sql .= " AND (nama_pihak_kedua LIKE ? OR nomor_kontrak LIKE ?)";
+        $searchParam = "%$search%";
+        $params[] = $searchParam;
+        $params[] = $searchParam;
     }
     
     $sql .= " ORDER BY tanggal_kontrak DESC";
     
-    $result = $conn->query($sql);
-    echo json_encode($result->fetch_all(MYSQLI_ASSOC));
+    $stmt = $conn->prepare($sql);
+    $stmt->execute($params);
+    echo json_encode($stmt->fetchAll());
     exit;
 }
 
@@ -397,19 +538,23 @@ if ($action === 'get_contracts') {
 if ($action === 'get_contract') {
     $id = $_GET['id'] ?? 0;
     $stmt = $conn->prepare("SELECT * FROM kontrak WHERE id_kontrak = ?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    echo json_encode($stmt->get_result()->fetch_assoc());
+    $stmt->execute([$id]);
+    echo json_encode($stmt->fetch());
     exit;
 }
 
 // Create new contract
 if ($action === 'create_contract') {
     $data = json_decode(file_get_contents('php://input'), true);
+    if (!$data) {
+        echo json_encode(['success' => false, 'error' => 'Invalid request data']);
+        exit;
+    }
     
     $year = date('Y');
-    $result = $conn->query("SELECT COUNT(*) as total FROM kontrak WHERE YEAR(tanggal_kontrak) = $year");
-    $row = $result->fetch_assoc();
+    $stmtYear = $conn->prepare("SELECT COUNT(*) as total FROM kontrak WHERE EXTRACT(YEAR FROM tanggal_kontrak) = ?");
+    $stmtYear->execute([$year]);
+    $row = $stmtYear->fetch();
     $nomor = sprintf("KTR/%s/%03d", $year, $row['total'] + 1);
     
     $stmt = $conn->prepare("INSERT INTO kontrak 
@@ -417,7 +562,7 @@ if ($action === 'create_contract') {
          masa_berlaku, nilai_kontrak, isi_kontrak, catatan, status) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')");
     
-    $stmt->bind_param("ssssssdss", 
+    if ($stmt->execute([
         $nomor,
         $data['tipe_kontrak'],
         $data['nama_pihak_kedua'],
@@ -427,12 +572,10 @@ if ($action === 'create_contract') {
         $data['nilai_kontrak'],
         $data['isi_kontrak'],
         $data['catatan']
-    );
-    
-    if ($stmt->execute()) {
-        echo json_encode(['success' => true, 'id' => $conn->insert_id, 'nomor_kontrak' => $nomor]);
+    ])) {
+        echo json_encode(['success' => true, 'id' => $conn->lastInsertId(), 'nomor_kontrak' => $nomor]);
     } else {
-        echo json_encode(['success' => false, 'error' => $conn->error]);
+        echo json_encode(['success' => false, 'error' => implode(', ', $conn->errorInfo())]);
     }
     exit;
 }
@@ -440,6 +583,10 @@ if ($action === 'create_contract') {
 // Update contract
 if ($action === 'update_contract') {
     $data = json_decode(file_get_contents('php://input'), true);
+    if (!$data) {
+        echo json_encode(['success' => false, 'error' => 'Invalid request data']);
+        exit;
+    }
     
     $stmt = $conn->prepare("UPDATE kontrak SET 
         tipe_kontrak = ?,
@@ -453,7 +600,7 @@ if ($action === 'update_contract') {
         status = ?
         WHERE id_kontrak = ?");
     
-    $stmt->bind_param("sssssdsssi",
+    echo json_encode(['success' => $stmt->execute([
         $data['tipe_kontrak'],
         $data['nama_pihak_kedua'],
         $data['email_pihak'],
@@ -464,20 +611,21 @@ if ($action === 'update_contract') {
         $data['catatan'],
         $data['status'],
         $data['id_kontrak']
-    );
-    
-    echo json_encode(['success' => $stmt->execute()]);
+    ])]);
     exit;
 }
 
 // Update contract status only
 if ($action === 'update_contract_status') {
     $data = json_decode(file_get_contents('php://input'), true);
+    if (!$data) {
+        echo json_encode(['success' => false, 'error' => 'Invalid request data']);
+        exit;
+    }
     
     $stmt = $conn->prepare("UPDATE kontrak SET status = ? WHERE id_kontrak = ?");
-    $stmt->bind_param("si", $data['status'], $data['id_kontrak']);
     
-    echo json_encode(['success' => $stmt->execute()]);
+    echo json_encode(['success' => $stmt->execute([$data['status'], $data['id_kontrak']])]);
     exit;
 }
 
@@ -485,22 +633,20 @@ if ($action === 'update_contract_status') {
 if ($action === 'delete_contract') {
     $id = $_GET['id'] ?? 0;
     $stmt = $conn->prepare("DELETE FROM kontrak WHERE id_kontrak = ?");
-    $stmt->bind_param("i", $id);
-    echo json_encode(['success' => $stmt->execute()]);
+    echo json_encode(['success' => $stmt->execute([$id])]);
     exit;
 }
 
 // Get expiring contracts
 if ($action === 'get_expiring_contracts') {
-    $days = $_GET['days'] ?? 30;
-    $sql = "SELECT * FROM kontrak 
+    $days = intval($_GET['days'] ?? 30);
+    $stmt = $conn->prepare("SELECT * FROM kontrak 
             WHERE status = 'aktif' 
             AND masa_berlaku IS NOT NULL
-            AND masa_berlaku BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL $days DAY)
-            ORDER BY masa_berlaku ASC";
-    
-    $result = $conn->query($sql);
-    echo json_encode($result->fetch_all(MYSQLI_ASSOC));
+            AND masa_berlaku BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '1 day' * ?
+            ORDER BY masa_berlaku ASC");
+    $stmt->execute([$days]);
+    echo json_encode($stmt->fetchAll());
     exit;
 }
 
@@ -523,13 +669,13 @@ if ($action === 'get_contract_stats') {
         SUM(CASE WHEN status = 'aktif' THEN nilai_kontrak ELSE 0 END) as total_nilai
         FROM kontrak");
     
-    $row = $result->fetch_assoc();
+    $row = $result->fetch();
     $stats = array_merge($stats, $row);
     
     $result2 = $conn->query("SELECT COUNT(*) as expiring FROM kontrak 
         WHERE status = 'aktif' 
-        AND masa_berlaku BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)");
-    $row2 = $result2->fetch_assoc();
+        AND masa_berlaku BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'");
+    $row2 = $result2->fetch();
     $stats['expiring_soon'] = $row2['expiring'];
     
     echo json_encode($stats);
@@ -539,9 +685,13 @@ if ($action === 'get_contract_stats') {
 // Save contract (legacy - keep for backward compatibility)
 if ($action === 'save_contract') {
     $data = json_decode(file_get_contents('php://input'), true);
+    if (!$data) {
+        echo json_encode(['success' => false, 'error' => 'Invalid request data']);
+        exit;
+    }
     $stmt = $conn->prepare("INSERT INTO kontrak (id_pesanan, nama_pihak_kedua, email_pihak, tanggal_kontrak, masa_berlaku, nilai_kontrak, isi_kontrak, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'draft')");
-    $stmt->bind_param("issssds", $data['id_pesanan'], $data['nama'], $data['email'], $data['tanggal'], $data['masa'], $data['nilai'], $data['isi']);
-    echo json_encode(['success' => $stmt->execute(), 'id' => $conn->insert_id]);
+    $stmt->execute([$data['id_pesanan'], $data['nama'], $data['email'], $data['tanggal'], $data['masa'], $data['nilai'], $data['isi']]);
+    echo json_encode(['success' => true, 'id' => $conn->lastInsertId()]);
     exit;
 }
 
@@ -561,14 +711,11 @@ if ($action === 'create_payment') {
         exit;
     }
     
-    // Generate order_id for Pakasir (must be unique)
     $order_id = 'MM-' . $id_pesanan . '-' . date('Hms') . '-' . substr(md5(uniqid()), 0, 4);
     $expired_at = date('Y-m-d H:i:s', time() + 3600);
     
-    // Get Pakasir payment method
     $pakasir_method = getPakasirPaymentMethod($payment_method);
     
-    // Create transaction at Pakasir.com using official API
     $pakasirResult = pakasirCreateTransaction($order_id, $amount, $pakasir_method);
     
     if (!$pakasirResult['success']) {
@@ -586,31 +733,25 @@ if ($action === 'create_payment') {
         exit;
     }
     
-    // Extract payment data from Pakasir response
     $paymentData = $pakasirResult['data'];
     $pakasir_transaction_id = $paymentData['order_id'] ?? $order_id;
     
-    // Get QR code URL and QRIS string from Pakasir response
     $qr_code_url = '';
     $qr_string = '';
     $va_number = '';
     
-    // For QRIS: payment_number contains the QRIS string with embedded amount
     if ($payment_method === 'qris' && isset($paymentData['payment_number'])) {
         $qr_string = $paymentData['payment_number'];
         $qr_code_url = pakasirGetQRCodeUrl($qr_string);
     }
     
-    // For VA: payment_number contains the VA number
     if (strpos($payment_method, 'va_') === 0 && isset($paymentData['payment_number'])) {
         $va_number = $paymentData['payment_number'];
     }
     
-    // Payment URL for redirect (fallback)
     $is_qris = ($payment_method === 'qris');
     $payment_url = pakasirGetPaymentUrl($order_id, $amount, $is_qris);
     
-    // Get fee and total from Pakasir
     $fee = $paymentData['fee'] ?? 0;
     $total_payment = $paymentData['total_payment'] ?? $amount;
     $expired_at_pakasir = $paymentData['expired_at'] ?? null;
@@ -618,12 +759,11 @@ if ($action === 'create_payment') {
         $expired_at = date('Y-m-d H:i:s', strtotime($expired_at_pakasir));
     }
     
-    // Save to database
     $stmt = $conn->prepare("INSERT INTO payment_transactions (id_pesanan, payment_reference, payment_method, amount, status, qr_code_url, qr_string, expired_at, pakasir_transaction_id, pakasir_response) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)");
     
     $pakasir_response = json_encode($paymentData);
     
-    $stmt->bind_param("issdsssss", 
+    if ($stmt->execute([
         $id_pesanan, 
         $order_id, 
         $payment_method, 
@@ -633,10 +773,9 @@ if ($action === 'create_payment') {
         $expired_at,
         $pakasir_transaction_id,
         $pakasir_response
-    );
-    
-    if ($stmt->execute()) {
-        $conn->query("UPDATE pesanan SET payment_reference = '$order_id' WHERE id_pesanan = $id_pesanan");
+    ])) {
+        $stmtUpdPesanan = $conn->prepare("UPDATE pesanan SET payment_reference = ? WHERE id_pesanan = ?");
+        $stmtUpdPesanan->execute([$order_id, $id_pesanan]);
         
         $response = [
             'success' => true,
@@ -652,7 +791,6 @@ if ($action === 'create_payment') {
             'pakasir_transaction_id' => $pakasir_transaction_id
         ];
         
-        // For VA, include VA number
         if (strpos($payment_method, 'va_') === 0 && !empty($va_number)) {
             $bank = strtoupper(str_replace('va_', '', $payment_method));
             $response['va_bank'] = $bank;
@@ -661,7 +799,7 @@ if ($action === 'create_payment') {
         
         echo json_encode($response);
     } else {
-        echo json_encode(['success' => false, 'error' => 'Failed to save payment: ' . $conn->error]);
+        echo json_encode(['success' => false, 'error' => 'Failed to save payment: ' . implode(', ', $conn->errorInfo())]);
     }
     exit;
 }
@@ -676,16 +814,14 @@ if ($action === 'check_payment_status') {
     }
     
     $stmt = $conn->prepare("SELECT * FROM payment_transactions WHERE payment_reference = ?");
-    $stmt->bind_param("s", $payment_reference);
-    $stmt->execute();
-    $result = $stmt->get_result()->fetch_assoc();
+    $stmt->execute([$payment_reference]);
+    $result = $stmt->fetch();
     
     if (!$result) {
         echo json_encode(['success' => false, 'error' => 'Payment not found']);
         exit;
     }
     
-    // If still pending, check with Pakasir API
     if ($result['status'] === 'pending') {
         $pakasirStatus = pakasirCheckStatus($payment_reference, $result['amount']);
         
@@ -693,18 +829,21 @@ if ($action === 'check_payment_status') {
             $pakasir_data = $pakasirStatus['data'];
             $pakasir_status = $pakasir_data['status'] ?? 'pending';
             
-            // Map Pakasir status to our status
             if ($pakasir_status === 'completed' || $pakasir_status === 'paid' || $pakasir_status === 'success') {
                 $paid_at = date('Y-m-d H:i:s');
-                $conn->query("UPDATE payment_transactions SET status = 'paid', paid_at = '$paid_at' WHERE payment_reference = '$payment_reference'");
-                $conn->query("UPDATE pesanan SET status_pesanan = 'lunas' WHERE payment_reference = '$payment_reference'");
+                $stmtUpd = $conn->prepare("UPDATE payment_transactions SET status = 'paid', paid_at = ? WHERE payment_reference = ?");
+                $stmtUpd->execute([$paid_at, $payment_reference]);
+                $stmtUpd2 = $conn->prepare("UPDATE pesanan SET status_pesanan = 'lunas' WHERE payment_reference = ?");
+                $stmtUpd2->execute([$payment_reference]);
                 $result['status'] = 'paid';
                 $result['paid_at'] = $paid_at;
             } elseif ($pakasir_status === 'expired') {
-                $conn->query("UPDATE payment_transactions SET status = 'expired' WHERE payment_reference = '$payment_reference'");
+                $stmtUpd = $conn->prepare("UPDATE payment_transactions SET status = 'expired' WHERE payment_reference = ?");
+                $stmtUpd->execute([$payment_reference]);
                 $result['status'] = 'expired';
             } elseif ($pakasir_status === 'failed' || $pakasir_status === 'cancelled') {
-                $conn->query("UPDATE payment_transactions SET status = 'failed' WHERE payment_reference = '$payment_reference'");
+                $stmtUpd = $conn->prepare("UPDATE payment_transactions SET status = 'failed' WHERE payment_reference = ?");
+                $stmtUpd->execute([$payment_reference]);
                 $result['status'] = 'failed';
             }
         }
@@ -723,11 +862,10 @@ if ($action === 'get_payment_history') {
     
     if ($id_pesanan) {
         $stmt = $conn->prepare("SELECT * FROM payment_transactions WHERE id_pesanan = ? ORDER BY created_at DESC");
-        $stmt->bind_param("i", $id_pesanan);
-        $stmt->execute();
-        $result = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->execute([$id_pesanan]);
+        $result = $stmt->fetchAll();
     } else {
-        $result = $conn->query("SELECT pt.*, p.tanggal_pesanan, pel.nama as customer_name FROM payment_transactions pt LEFT JOIN pesanan p ON pt.id_pesanan = p.id_pesanan LEFT JOIN pelanggan pel ON p.id_pelanggan = pel.id_pelanggan ORDER BY pt.created_at DESC LIMIT 50")->fetch_all(MYSQLI_ASSOC);
+        $result = $conn->query("SELECT pt.*, p.tanggal_pesanan, pel.nama as customer_name FROM payment_transactions pt LEFT JOIN pesanan p ON pt.id_pesanan = p.id_pesanan LEFT JOIN pelanggan pel ON p.id_pelanggan = pel.id_pelanggan ORDER BY pt.created_at DESC LIMIT 50")->fetchAll();
     }
     
     echo json_encode(['success' => true, 'payments' => $result]);
@@ -744,8 +882,10 @@ if ($action === 'simulate_payment_success') {
     }
     
     $paid_at = date('Y-m-d H:i:s');
-    $conn->query("UPDATE payment_transactions SET status = 'paid', paid_at = '$paid_at' WHERE payment_reference = '$payment_reference'");
-    $conn->query("UPDATE pesanan SET status_pesanan = 'lunas' WHERE payment_reference = '$payment_reference'");
+    $stmtUpd1 = $conn->prepare("UPDATE payment_transactions SET status = 'paid', paid_at = ? WHERE payment_reference = ?");
+    $stmtUpd1->execute([$paid_at, $payment_reference]);
+    $stmtUpd2 = $conn->prepare("UPDATE pesanan SET status_pesanan = 'lunas' WHERE payment_reference = ?");
+    $stmtUpd2->execute([$payment_reference]);
     
     echo json_encode(['success' => true, 'message' => 'Payment marked as paid']);
     exit;
@@ -758,27 +898,14 @@ if ($action === 'webhook') {
     $ip_address = $_SERVER['REMOTE_ADDR'] ?? '';
     $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
     
-    // Pakasir webhook format:
-    // {
-    //   "order_id": "MM-1-050548-097e",
-    //   "amount": 15000,
-    //   "status": "completed" | "pending" | "failed",
-    //   "payment_method": "qris" | "bca_va" | etc,
-    //   "completed_at": "2026-05-13T...",
-    //   "project": "test"
-    // }
-    
     $payment_ref = $webhookData['order_id'] ?? $webhookData['external_id'] ?? '';
     $event_type = 'payment_notification';
     $webhook_json = $rawBody;
     
-    // Log webhook
     $stmt = $conn->prepare("INSERT INTO payment_webhooks (payment_reference, event_type, webhook_data, ip_address, user_agent) VALUES (?, ?, ?, ?, ?)");
-    $stmt->bind_param("sssss", $payment_ref, $event_type, $webhook_json, $ip_address, $user_agent);
-    $stmt->execute();
-    $webhook_id = $conn->insert_id;
+    $stmt->execute([$payment_ref, $event_type, $webhook_json, $ip_address, $user_agent]);
+    $webhook_id = $conn->lastInsertId();
     
-    // Process webhook
     if ($payment_ref && isset($webhookData['status'])) {
         $status = strtolower($webhookData['status']);
         $payment_method_pakasir = $webhookData['payment_method'] ?? '';
@@ -786,32 +913,25 @@ if ($action === 'webhook') {
         if ($status === 'paid' || $status === 'success' || $status === 'completed') {
             $paid_at = date('Y-m-d H:i:s');
             
-            // Update payment_method if Pakasir provides it
             if ($payment_method_pakasir) {
                 $stmt = $conn->prepare("UPDATE payment_transactions SET status = 'paid', paid_at = ?, payment_method = ? WHERE payment_reference = ?");
-                $stmt->bind_param("sss", $paid_at, $payment_method_pakasir, $payment_ref);
-                $stmt->execute();
+                $stmt->execute([$paid_at, $payment_method_pakasir, $payment_ref]);
             } else {
                 $stmt = $conn->prepare("UPDATE payment_transactions SET status = 'paid', paid_at = ? WHERE payment_reference = ?");
-                $stmt->bind_param("ss", $paid_at, $payment_ref);
-                $stmt->execute();
+                $stmt->execute([$paid_at, $payment_ref]);
             }
             
-            // Update order status
             $stmt = $conn->prepare("UPDATE pesanan SET status_pesanan = 'lunas' WHERE payment_reference = ?");
-            $stmt->bind_param("s", $payment_ref);
-            $stmt->execute();
+            $stmt->execute([$payment_ref]);
             
-            // Mark webhook processed
-            $conn->query("UPDATE payment_webhooks SET processed = TRUE WHERE id = $webhook_id");
+            $stmtWh = $conn->prepare("UPDATE payment_webhooks SET processed = TRUE WHERE id = ?");
+            $stmtWh->execute([$webhook_id]);
         } elseif ($status === 'expired') {
             $stmt = $conn->prepare("UPDATE payment_transactions SET status = 'expired' WHERE payment_reference = ?");
-            $stmt->bind_param("s", $payment_ref);
-            $stmt->execute();
+            $stmt->execute([$payment_ref]);
         } elseif ($status === 'failed' || $status === 'cancelled') {
             $stmt = $conn->prepare("UPDATE payment_transactions SET status = 'failed' WHERE payment_reference = ?");
-            $stmt->bind_param("s", $payment_ref);
-            $stmt->execute();
+            $stmt->execute([$payment_ref]);
         }
     }
     
@@ -837,7 +957,7 @@ if ($action === 'get_payment_methods') {
     ];
     
     $result = $conn->query("SELECT setting_value FROM settings WHERE setting_key = 'payment_methods_enabled'");
-    if ($result && $row = $result->fetch_assoc()) {
+    if ($row = $result->fetch()) {
         $enabled = json_decode($row['setting_value'], true);
         if (is_array($enabled)) {
             $payment_methods = array_filter($payment_methods, function($m) use ($enabled) {
@@ -847,6 +967,137 @@ if ($action === 'get_payment_methods') {
     }
     
     echo json_encode(['success' => true, 'methods' => array_values($payment_methods)]);
+    exit;
+}
+
+// ==================== NOTIFICATIONS ====================
+
+// Auto-generate system notifications for current events
+function autoGenerateNotifications($conn) {
+    $today = date('Y-m-d');
+    $generated = [];
+    
+    // 1. New orders today (for owner, kasir)
+    $orderStmt = $conn->prepare("SELECT COUNT(*) as cnt FROM pesanan WHERE DATE(created_at) = ? AND status_pesanan = 'pending'");
+    $orderStmt->execute([$today]);
+    $row = $orderStmt->fetch();
+    if ($row && $row['cnt'] > 0) {
+        $existsStmt = $conn->prepare("SELECT id FROM notifications WHERE type='order' AND DATE(created_at) = ? AND message LIKE 'Ada%pesanan%'");
+        $existsStmt->execute([$today]);
+        if ($existsStmt->rowCount() === 0) {
+            $notifMsg = "Ada {$row['cnt']} pesanan baru yang perlu diproses.";
+            $stmt = $conn->prepare("INSERT INTO notifications (type, title, message, link, role_filter) VALUES (?, ?, ?, ?, NULL)");
+            $stmt->execute(['order', 'Pesanan Baru', $notifMsg, '/orders']);
+            $generated[] = 'order';
+        }
+    }
+    
+    // 2. Low stock items (for owner, staff_gudang)
+    $stockStmt = $conn->prepare("SELECT COUNT(*) as cnt FROM produk WHERE stok > 0 AND stok <= 10");
+    $stockStmt->execute();
+    $row = $stockStmt->fetch();
+    if ($row && $row['cnt'] > 0) {
+        $existsStmt = $conn->prepare("SELECT id FROM notifications WHERE type='stock' AND DATE(created_at) = ? AND message LIKE '%stok menipis%'");
+        $existsStmt->execute([$today]);
+        if ($existsStmt->rowCount() === 0) {
+            $notifMsg = "{$row['cnt']} item dengan stok menipis. Segera lakukan restok.";
+            $stmt = $conn->prepare("INSERT INTO notifications (type, title, message, link, role_filter) VALUES (?, ?, ?, ?, NULL)");
+            $stmt->execute(['stock', 'Stok Menipis', $notifMsg, '/inventory']);
+            $generated[] = 'stock';
+        }
+    }
+    
+    // 3. Expiring contracts (for owner, admin_keuangan)
+    $contractStmt = $conn->prepare("SELECT COUNT(*) as cnt FROM kontrak WHERE masa_berlaku BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days' AND status = 'aktif'");
+    $contractStmt->execute();
+    $row = $contractStmt->fetch();
+    if ($row && $row['cnt'] > 0) {
+        $existsStmt = $conn->prepare("SELECT id FROM notifications WHERE type='contract' AND DATE(created_at) = ? AND message LIKE '%kontrak%berakhir%'");
+        $existsStmt->execute([$today]);
+        if ($existsStmt->rowCount() === 0) {
+            $notifMsg = "{$row['cnt']} kontrak akan berakhir dalam 30 hari ke depan.";
+            $stmt = $conn->prepare("INSERT INTO notifications (type, title, message, link, role_filter) VALUES (?, ?, ?, ?, ?)");
+            $stmt->execute(['contract', 'Kontrak Akan Berakhir', $notifMsg, '/contracts', 'owner']);
+            $generated[] = 'contract';
+        }
+    }
+    
+    return $generated;
+}
+
+// GET / POST notifications
+if ($action === 'get_notifications') {
+    autoGenerateNotifications($conn);
+    
+    $role = $_GET['role'] ?? $_POST['role'] ?? '';
+    $limit = intval($_GET['limit'] ?? $_POST['limit'] ?? 50);
+    
+    $sql = "SELECT * FROM notifications WHERE (role_filter IS NULL OR role_filter = '' OR role_filter = ?) ORDER BY created_at DESC LIMIT ?";
+    $stmt = $conn->prepare($sql);
+    $stmt->execute([$role, $limit]);
+    
+    $notifications = $stmt->fetchAll();
+    
+    $unreadSql = "SELECT COUNT(*) as cnt FROM notifications WHERE (role_filter IS NULL OR role_filter = '' OR role_filter = ?) AND is_read = 0";
+    $unreadStmt = $conn->prepare($unreadSql);
+    $unreadStmt->execute([$role]);
+    $unreadCount = $unreadStmt->fetch()['cnt'];
+    
+    echo json_encode([
+        'success' => true,
+        'notifications' => $notifications,
+        'unread_count' => (int)$unreadCount
+    ]);
+    exit;
+}
+
+// Mark single notification as read
+if ($action === 'mark_notification_read') {
+    $data = json_decode(file_get_contents('php://input'), true);
+    $id = intval($data['id'] ?? $_GET['id'] ?? 0);
+    
+    if ($id > 0) {
+        $stmt = $conn->prepare("UPDATE notifications SET is_read = 1 WHERE id = ?");
+        $stmt->execute([$id]);
+    }
+    
+    echo json_encode(['success' => true]);
+    exit;
+}
+
+// Mark all notifications as read
+if ($action === 'mark_all_notifications_read') {
+    $role = $_GET['role'] ?? $_POST['role'] ?? '';
+    
+    if ($role) {
+        $stmt = $conn->prepare("UPDATE notifications SET is_read = 1 WHERE (role_filter IS NULL OR role_filter = '' OR role_filter = ?)");
+        $stmt->execute([$role]);
+    } else {
+        $conn->query("UPDATE notifications SET is_read = 1");
+    }
+    
+    echo json_encode(['success' => true]);
+    exit;
+}
+
+// Add notification (can be called from frontend when events happen)
+if ($action === 'add_notification') {
+    $data = json_decode(file_get_contents('php://input'), true);
+    
+    $type = $data['type'] ?? 'system';
+    $title = $data['title'] ?? '';
+    $message = $data['message'] ?? '';
+    $link = $data['link'] ?? '';
+    $role_filter = $data['role_filter'] ?? '';
+    
+    if ($title && $message) {
+        $roleFilterValue = $role_filter ?: null;
+        $stmt = $conn->prepare("INSERT INTO notifications (type, title, message, link, role_filter) VALUES (?, ?, ?, ?, ?)");
+        $stmt->execute([$type, $title, $message, $link, $roleFilterValue]);
+        echo json_encode(['success' => true, 'id' => $conn->lastInsertId()]);
+    } else {
+        echo json_encode(['success' => false, 'error' => 'Title and message required']);
+    }
     exit;
 }
 

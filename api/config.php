@@ -1,10 +1,16 @@
 <?php
 /**
  * MiMatcha Database Configuration
- * Connection script untuk PHP MySQLi
+ * Connection script untuk PHP PDO PostgreSQL
+ * 
+ * Semua credential dibaca dari environment variable.
+ * Untuk hosting, set variabel berikut:
+ *   DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_NAME
+ * 
+ * Untuk development lokal, bisa pakai .env file di root project
  */
 
-// Load .env file from project root
+// Load .env file from project root (development only)
 function loadEnv($path = null) {
     if (!$path) {
         $path = dirname(__DIR__) . '/.env';
@@ -34,43 +40,106 @@ function loadEnv($path = null) {
 
 loadEnv();
 
+/**
+ * Database Credentials — baca dari environment variable
+ * 
+ * Hosting (Railway): DATABASE_URL otomatis dari PostgreSQL addon
+ *   Format: postgresql://user:password@host:port/database
+ * 
+ * Hosting (manual): set DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_NAME
+ * Local:            set via .env file di root project, atau pakai default (Laragon)
+ * 
+ * PostgreSQL default (Laragon):
+ *   Host: 127.0.0.1
+ *   Port: 5432
+ *   User: postgres
+ *   Pass: (kosong)
+ */
+$host = '127.0.0.1';
+$port = '5432';
+$user = 'postgres';
+$pass = '';
+$dbname = 'mimatcha_db';
+
+// Priority: DATABASE_URL (Railway) > DB_HOST/DB_PORT/... > local defaults
+$databaseUrl = getenv('DATABASE_URL');
+if ($databaseUrl) {
+    // Parse DATABASE_URL: postgresql://user:password@host:port/database?sslmode=require
+    $parts = parse_url($databaseUrl);
+    $host = $parts['host'] ?? $host;
+    $port = $parts['port'] ?? $port;
+    $user = $parts['user'] ?? $user;
+    $pass = $parts['pass'] ?? $pass;
+    $dbname = ltrim($parts['path'] ?? '', '/') ?: $dbname;
+} else {
+    $host = getenv('DB_HOST') ?: $host;
+    $port = getenv('DB_PORT') ?: $port;
+    $user = getenv('DB_USER') ?: $user;
+    $pass = getenv('DB_PASS') ?: $pass;
+    $dbname = getenv('DB_NAME') ?: $dbname;
+}
+
 // OpenRouter API Key
 if (!defined('OPENROUTER_API_KEY')) {
     define('OPENROUTER_API_KEY', getenv('OPENROUTER_API_KEY') ?: '');
 }
 
-$host = '127.0.0.1';
-$port = '3308';
-$user = 'root';
-$pass = '';
-$dbname = 'mimatcha_db';
-
-$conn = new mysqli($host, $user, $pass, $dbname, $port);
-
-if ($conn->connect_error) {
-    die("Koneksi Gagal: " . $conn->connect_error);
+try {
+    $conn = new PDO("pgsql:host=$host;port=$port;dbname=$dbname", $user, $pass, [
+        PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES   => false,
+    ]);
+} catch (PDOException $e) {
+    die("Koneksi Gagal: " . $e->getMessage());
 }
 
-$conn->set_charset("utf8mb4");
+/**
+ * Auto-initialize database schema jika tabel belum ada.
+ */
+$tables_exist = $conn->query("SELECT 1 FROM information_schema.tables WHERE table_name = 'produk' AND table_schema = 'public'")->fetch();
+if (!$tables_exist) {
+    $schema_path = dirname(__DIR__) . '/database/migrasi_postgresql.sql';
+    if (file_exists($schema_path)) {
+        $sql = file_get_contents($schema_path);
+        
+        // Hapus baris yang gak relevan (CREATE DATABASE, komentar) biar gak konflik
+        $lines = explode("\n", $sql);
+        $filtered = [];
+        foreach ($lines as $line) {
+            $trimmed = trim($line);
+            if (preg_match('/^(CREATE DATABASE|USE|SOURCE)/i', $trimmed)) continue;
+            if (preg_match('/^--/i', $trimmed)) continue;
+            $filtered[] = $line;
+        }
+        
+        $clean_sql = implode("\n", $filtered);
+        // PDO PostgreSQL mengeksekusi multi-statement via exec()
+        try {
+            $conn->exec($clean_sql);
+        } catch (PDOException $e) {
+            error_log("MiMatcha DB Init Warning: " . $e->getMessage());
+        }
+    }
+}
 
 function getAllProducts() {
     global $conn;
     $result = $conn->query("SELECT * FROM produk ORDER BY kategori, nama_produk");
-    return $result->fetch_all(MYSQLI_ASSOC);
+    return $result->fetchAll();
 }
 
 function getProductById($id) {
     global $conn;
     $stmt = $conn->prepare("SELECT * FROM produk WHERE id_produk = ?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    return $stmt->get_result()->fetch_assoc();
+    $stmt->execute([$id]);
+    return $stmt->fetch();
 }
 
 function getAllCustomers() {
     global $conn;
     $result = $conn->query("SELECT * FROM pelanggan ORDER BY nama");
-    return $result->fetch_all(MYSQLI_ASSOC);
+    return $result->fetchAll();
 }
 
 function getAllTransactions() {
@@ -81,35 +150,34 @@ function getAllTransactions() {
         LEFT JOIN pelanggan pel ON p.id_pelanggan = pel.id_pelanggan 
         ORDER BY p.tanggal_pesanan DESC
     ");
-    return $result->fetch_all(MYSQLI_ASSOC);
+    return $result->fetchAll();
 }
 
 function saveTransaction($data) {
     global $conn;
     
-    $conn->begin_transaction();
+    $conn->beginTransaction();
     
     try {
         $stmt = $conn->prepare("INSERT INTO pesanan (id_pelanggan, tanggal_pesanan, total_pembayaran, status_pesanan, metode_pembayaran, kasir) VALUES (?, ?, ?, 'lunas', ?, ?)");
         $tanggal = date('Y-m-d');
-        $stmt->bind_param("isdss", $data['id_pelanggan'], $tanggal, $data['total'], $data['metode'], $data['kasir']);
-        $stmt->execute();
+        $stmt->execute([$data['id_pelanggan'], $tanggal, $data['total'], $data['metode'], $data['kasir']]);
         
-        $pesanan_id = $conn->insert_id;
+        $pesanan_id = $conn->lastInsertId();
         
         foreach ($data['items'] as $item) {
             $stmt2 = $conn->prepare("INSERT INTO detail_pesanan (id_pesanan, id_produk, jumlah_produk, harga_satuan, subtotal) VALUES (?, ?, ?, ?, ?)");
-            $stmt2->bind_param("iiidd", $pesanan_id, $item['id'], $item['qty'], $item['harga'], $item['subtotal']);
-            $stmt2->execute();
+            $stmt2->execute([$pesanan_id, $item['id'], $item['qty'], $item['harga'], $item['subtotal']]);
             
-            $conn->query("UPDATE produk SET stok = stok - " . $item['qty'] . " WHERE id_produk = " . $item['id']);
+            $stmtStock = $conn->prepare("UPDATE produk SET stok = stok - ? WHERE id_produk = ?");
+            $stmtStock->execute([$item['qty'], $item['id']]);
         }
         
         $conn->commit();
         return ['success' => true, 'id' => $pesanan_id];
         
     } catch (Exception $e) {
-        $conn->rollback();
+        $conn->rollBack();
         return ['success' => false, 'error' => $e->getMessage()];
     }
 }
@@ -118,17 +186,16 @@ function saveContract($data) {
     global $conn;
     
     $stmt = $conn->prepare("INSERT INTO kontrak (id_pesanan, nama_pihak_kedua, email_pihak, tanggal_kontrak, masa_berlaku, nilai_kontrak, isi_kontrak, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'draft')");
-    $stmt->bind_param("issssds", $data['id_pesanan'], $data['nama'], $data['email'], $data['tanggal'], $data['masa'], $data['nilai'], $data['isi']);
     
-    if ($stmt->execute()) {
-        return ['success' => true, 'id' => $conn->insert_id];
+    if ($stmt->execute([$data['id_pesanan'], $data['nama'], $data['email'], $data['tanggal'], $data['masa'], $data['nilai'], $data['isi']])) {
+        return ['success' => true, 'id' => $conn->lastInsertId()];
     }
-    return ['success' => false, 'error' => $conn->error];
+    return ['success' => false, 'error' => 'Failed to save contract'];
 }
 
 function getContracts() {
     global $conn;
     $result = $conn->query("SELECT * FROM kontrak ORDER BY tanggal_kontrak DESC");
-    return $result->fetch_all(MYSQLI_ASSOC);
+    return $result->fetchAll();
 }
 ?>

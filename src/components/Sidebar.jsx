@@ -2,8 +2,34 @@ import { Link, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, ShoppingCart, Package, Users, Tag, CreditCard, 
   Box, List, Truck, BarChart3, ClipboardList, PieChart, 
-  Settings, UserCog, History, LogOut, Menu, Bell, Banknote, FileText
+  Settings, UserCog, History, LogOut, Menu, Bell, FileText,
+  Crown, UserCircle, Warehouse, BadgeDollarSign, Home
 } from 'lucide-react';
+
+// Role-based menu visibility
+const ROLE_MENU_ACCESS = {
+  owner: '*',
+  kasir: ['/pos', '/orders', '/receipt'],
+  staff_gudang: ['/inventory', '/products'],
+  admin_keuangan: ['/dashboard', '/orders', '/contracts', '/reports'],
+  user: []
+};
+
+function hasMenuAccess(role, path) {
+  if (role === 'owner') return true;
+  const allowed = ROLE_MENU_ACCESS[role];
+  if (!allowed) return false;
+  return allowed.some(route => path === route || path.startsWith(route + '/'));
+}
+
+const ROLE_CONFIG = [
+  { value: 'owner', label: 'Owner', icon: <Crown size={14} />, color: '#4c632d' },
+  { value: 'kasir', label: 'Kasir', icon: <UserCircle size={14} />, color: '#2563eb' },
+  { value: 'staff_gudang', label: 'Staff Gudang', icon: <Warehouse size={14} />, color: '#d97706' },
+  { value: 'admin_keuangan', label: 'Admin Keuangan', icon: <BadgeDollarSign size={14} />, color: '#7c3aed' },
+];
+
+const getRoleInfo = (role) => ROLE_CONFIG.find(r => r.value === role) || ROLE_CONFIG[0];
 
 const Sidebar = () => {
   const location = useLocation();
@@ -19,14 +45,16 @@ const Sidebar = () => {
     if (user) {
       return JSON.parse(user);
     }
-    return { name: 'Kasir', email: 'kasir@mimatcha.id' };
+    return { name: 'User', email: 'user@mimatcha.id' };
   };
 
   const user = getUserInfo();
   const role = localStorage.getItem('mimatcha_role');
+  const roleInfo = getRoleInfo(role);
 
   const menuItems = [
     { section: 'DASHBOARD', items: [
+      { name: 'Beranda', icon: <Home size={20} />, path: '/' },
       { name: 'Dashboard', icon: <LayoutDashboard size={20} />, path: '/dashboard' },
     ]},
     { section: 'SALES', items: [
@@ -36,9 +64,6 @@ const Sidebar = () => {
     ]},
     { section: 'BUSINESS', items: [
       { name: 'Kontrak', icon: <FileText size={20} />, path: '/contracts' },
-    ]},
-    { section: 'TOOLS', items: [
-      { name: 'Analisis Uang', icon: <Banknote size={20} />, path: '/money-analyzer' },
     ]},
     { section: 'INVENTORY', items: [
       { name: 'Items', icon: <Box size={20} />, path: '/inventory' },
@@ -51,17 +76,27 @@ const Sidebar = () => {
     ]},
   ];
 
+  // Filter menu items by role
+  const filteredMenuItems = menuItems
+    .map(section => ({
+      ...section,
+      items: section.items.filter(item => hasMenuAccess(role, item.path))
+    }))
+    .filter(section => section.items.length > 0);
+
   return (
     <aside className="dashboard-sidebar">
       <div className="sidebar-header">
-        <div className="logo-wrapper">
-          <div className="logo-icon">SP</div>
-          <span className="brand-name">MIMATCHA</span>
-        </div>
+        <Link to="/" className="sidebar-logo-link">
+          <div className="logo-wrapper">
+            <img src="/LogoM.jpeg" alt="MiMatcha" className="sidebar-logo" />
+            <span className="brand-name">Mimatcha</span>
+          </div>
+        </Link>
       </div>
 
       <nav className="sidebar-content">
-        {menuItems.map((section, idx) => (
+        {filteredMenuItems.map((section, idx) => (
           <div key={idx} className="nav-section">
             <h3 className="section-title">{section.section}</h3>
             <ul className="nav-list">
@@ -84,22 +119,16 @@ const Sidebar = () => {
           <div className="user-details">
             <span className="user-name">{user.name}</span>
             <span className="user-email">{user.email}</span>
+            <span className="user-role-badge" style={{
+              display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+              fontSize: '0.7rem', fontWeight: 600, marginTop: '2px',
+              color: roleInfo.color
+            }}>
+              {roleInfo.icon} {roleInfo.label}
+            </span>
           </div>
         </div>
-        <button onClick={handleLogout} style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: '0.5rem',
-          width: '100%',
-          padding: '0.75rem',
-          marginTop: '0.5rem',
-          background: 'none',
-          border: '1px solid #e74c3c',
-          borderRadius: '8px',
-          color: '#e74c3c',
-          cursor: 'pointer',
-          fontSize: '0.9rem'
-        }}>
+        <button onClick={handleLogout} className="logout-btn">
           <LogOut size={18} /> Keluar
         </button>
       </div>

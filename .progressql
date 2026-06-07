@@ -1,0 +1,97 @@
+# Progres Migrasi MySQL → PostgreSQL
+
+**Proyek**: MiMatcha — Manajemen Bisnis (POS, Kontrak, Payment)
+**Tanggal Mulai**: 2026-06-07
+**Target**: Laragon PostgreSQL (port 5432, user postgres, tanpa password)
+
+---
+
+## Status
+
+| Komponen | Status | Catatan |
+|---|---|---|
+| `database/migrasi_postgresql.sql` | ✅ Selesai | 10 tabel + seeder (UNIQUE index on pelanggan.email) |
+| `api/config.php` | ✅ Selesai | PDO pgsql, port 5432 |
+| `api/index.php` | ✅ Selesai | ~1100 baris, full PDO PostgreSQL |
+| `api/payment.php` | ✅ Selesai | ~324 baris, PDO PostgreSQL |
+| `api/detect_money.php` | ✅ Selesai | Tanpa DB queries |
+| `.progressql` | ✅ Selesai | Dokumentasi migrasi |
+| PostgreSQL install | ✅ Selesai | PostgreSQL 17.4 via winget |
+| PHP pdo_pgsql ext | ✅ Selesai | Diaktifkan di PHP 8.3.12 php.ini |
+| Database init | ✅ Selesai | 10 tabel, 4 users, 2 notifications |
+| API test login | ✅ Berhasil | owner@mimatcha.id / owner123 |
+| API test add_product | ✅ Berhasil | Insert ke PostgreSQL |
+| **Migrasi Data MySQL → PG** | ✅ Selesai | 105 baris, semua tabel 100% match |
+| `api/migrate_mysql_to_pg.php` | ✅ Selesai | Script one-time migrasi (bisa dihapus) |
+
+---
+
+## Koneksi
+
+| Parameter | Nilai |
+|---|---|
+| Host | 127.0.0.1 |
+| Port | 5432 |
+| User | postgres |
+| Password | (kosong) |
+| Database | mimatcha_db |
+| Driver | PDO pgsql |
+
+---
+
+## PostgreSQL Management
+
+```powershell
+# Start PostgreSQL
+$pgDir = "C:\laragon\bin\postgresql\pgsql"
+$env:Path = "$pgDir\bin;$env:Path"
+& "$pgDir\bin\pg_ctl.exe" -D "C:\laragon\bin\postgresql\data" -l "C:\laragon\bin\postgresql\data\pg.log" start
+
+# Stop PostgreSQL
+& "$pgDir\bin\pg_ctl.exe" -D "C:\laragon\bin\postgresql\data" stop
+
+# Check status
+& "$pgDir\bin\pg_isready.exe"
+
+# Connect to psql
+psql -U postgres -d mimatcha_db
+```
+
+---
+
+## Perubahan MySQL → PostgreSQL (Ringkasan)
+
+| MySQL | PostgreSQL |
+|---|---|
+| `AUTO_INCREMENT` | `GENERATED ALWAYS AS IDENTITY` |
+| `TINYINT(1)` | `SMALLINT` |
+| `LONGTEXT` | `TEXT` |
+| `ON UPDATE CURRENT_TIMESTAMP` | Trigger `BEFORE UPDATE` |
+| `new mysqli(...)` | `new PDO("pgsql:...")` |
+| `$stmt->bind_param(...)` | `$stmt->execute([...])` |
+| `$conn->insert_id` | `$conn->lastInsertId()` |
+| `ON DUPLICATE KEY UPDATE` | `ON CONFLICT ... DO UPDATE SET` |
+| `CURDATE()` | `CURRENT_DATE` |
+| `DATE_ADD(CURDATE(), INTERVAL n DAY)` | `CURRENT_DATE + INTERVAL '1 day' * n` |
+| `YEAR(col)` | `EXTRACT(YEAR FROM col)` |
+
+---
+
+## Hasil Migrasi Data
+
+| Tabel | MySQL | PostgreSQL | Status |
+|-------|-------|-----------|--------|
+| users | 4 | 4 | ✅ |
+| pelanggan | 4 | 4 | ✅ |
+| produk | 11 | 11 | ✅ |
+| pesanan | 24 | 24 | ✅ |
+| detail_pesanan | 25 | 25 | ✅ |
+| kontrak | 8 | 8 | ✅ |
+| payment_transactions | 12 | 12 | ✅ |
+| payment_webhooks | 0 | 0 | ✅ |
+| settings | 14 | 14 | ✅ |
+| notifications | 3 | 3 | ✅ |
+| **Total** | **105** | **105** | **✅ 100%** |
+
+**Tanggal migrasi**: 2026-06-07
+**Metode**: PHP script via Apache (port 5432, user postgres, no password)

@@ -1,0 +1,8 @@
+[phases]
+setup = [
+  "mkdir -p public/dist",
+  "cp -r dist/* public/dist/ 2>/dev/null || true"
+]
+
+[start]
+cmd = "php -S 0.0.0.0:\ -t public"

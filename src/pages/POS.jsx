@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { 
-  Search, Bell, User, Plus, Minus, X, 
+  Search, User, Plus, Minus, X, 
   ChevronDown, Grid, List, ChevronLeft, ChevronRight,
-  ShoppingCart, Trash2, Edit2, Pause, FileText, CreditCard,
-  ShoppingBag, AlertCircle, Activity
+  ShoppingCart, Trash2, Edit2, Pause, FileText, CreditCard
 } from 'lucide-react';
 import api from '../api/service';
 import ReceiptModal from '../components/ReceiptModal';
@@ -15,25 +14,20 @@ const formatRupiah = (num) => {
 
 const POS = () => {
   const [products, setProducts] = useState([]);
-  const [categories, setCategories] = useState([]);
   const [cart, setCart] = useState([]);
-  const [selectedCategory, setSelectedCategory] = useState('All');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState('grid');
   const [sortBy, setSortBy] = useState('Popular');
   const [showSortDropdown, setShowSortDropdown] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 8;
+  const itemsPerPage = 20;
   
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [notifications, setNotifications] = useState([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showCashModal, setShowCashModal] = useState(false);
   const [showPaymentDetailsModal, setShowPaymentDetailsModal] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
   const [receiptData, setReceiptData] = useState(null);
   const [paymentData, setPaymentData] = useState(null);
   const [currentPaymentMethod, setCurrentPaymentMethod] = useState(null);
@@ -92,8 +86,6 @@ const POS = () => {
       const productsResult = await api.getProducts();
       if (productsResult && Array.isArray(productsResult)) {
         setProducts(productsResult);
-        const cats = [...new Set(productsResult.map(p => p.kategori || 'Uncategorized'))];
-        setCategories(['All', ...cats]);
         localStorage.setItem('pos_products_last_fetched', Date.now().toString());
       }
     } catch (error) {
@@ -112,12 +104,9 @@ const POS = () => {
       
       if (productsResult && Array.isArray(productsResult)) {
         setProducts(productsResult);
-        const cats = [...new Set(productsResult.map(p => p.kategori || 'Uncategorized'))];
-        setCategories(['All', ...cats]);
         localStorage.setItem('pos_products_last_fetched', Date.now().toString());
       } else {
         setProducts([]);
-        setCategories(['All']);
       }
 
       // Auto-detect payment methods from API; fall back to defaults if none configured
@@ -127,36 +116,6 @@ const POS = () => {
         // Use built-in defaults so POS always has usable payment options
         setPaymentMethods(DEFAULT_PAYMENT_METHODS);
       }
-
-      // Load Notifications (Same as Dashboard for consistency)
-      const newNotifications = [];
-      if (statsResult && Array.isArray(statsResult.pesanan_terbaru)) {
-        statsResult.pesanan_terbaru.slice(0, 3).forEach(order => {
-          newNotifications.push({
-            id: `order-${order.id_pesanan}`,
-            text: `New order #${order.id_pesanan} received`,
-            time: 'Recently',
-            icon: <ShoppingBag size={14}/>,
-            type: 'order',
-            link: '/orders'
-          });
-        });
-      }
-      if (inventoryResult && Array.isArray(inventoryResult)) {
-        const lowStockItems = inventoryResult.filter(item => item.stok > 0 && item.stok <= 10);
-        if (lowStockItems.length > 0) {
-          newNotifications.push({
-            id: 'low-stock-alert',
-            text: `${lowStockItems.length} items low on stock`,
-            time: 'Check Now',
-            icon: <AlertCircle size={14}/>,
-            type: 'alert',
-            link: '/inventory'
-          });
-        }
-      }
-      setNotifications(newNotifications);
-      setUnreadCount(newNotifications.length);
 
     } catch (error) {
       console.error('Error loading POS data:', error);
@@ -168,20 +127,57 @@ const POS = () => {
   // Logic for filtering, sorting and pagination
   const processedProducts = products
     .filter(p => {
-      const matchesCategory = selectedCategory === 'All' || p.kategori === selectedCategory;
       const matchesSearch = p.nama_produk.toLowerCase().includes(searchTerm.toLowerCase());
-      return matchesCategory && matchesSearch && p.stok > 0;
+      return matchesSearch;
     })
     .sort((a, b) => {
       if (sortBy === 'Name (A-Z)') return a.nama_produk.localeCompare(b.nama_produk);
       if (sortBy === 'Name (Z-A)') return b.nama_produk.localeCompare(a.nama_produk);
       if (sortBy === 'Price: Low to High') return a.harga - b.harga;
       if (sortBy === 'Price: High to Low') return b.harga - a.harga;
-      return 0; // Popular (default)
+      // Popular: predefined popularity order
+      const popularOrder = [
+        'Matcha Cookies',
+        'Coconut Matcha',
+        'Matcha Cloud',
+        'Blueberry Matcha',
+        'Honey Matcha',
+        'Matcha Latte',
+        'Matcha Frappe',
+        'Green Tea',
+        'Matcha Smoothie',
+        'Iced Matcha'
+      ];
+      const indexA = popularOrder.findIndex(name => a.nama_produk.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(a.nama_produk.toLowerCase()));
+      const indexB = popularOrder.findIndex(name => b.nama_produk.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(b.nama_produk.toLowerCase()));
+      const rankA = indexA >= 0 ? indexA : 99;
+      const rankB = indexB >= 0 ? indexB : 99;
+      return rankA - rankB;
     });
 
   const totalPages = Math.ceil(processedProducts.length / itemsPerPage);
   const currentProducts = processedProducts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  // Popularity check helper
+  const getPopularRank = (product) => {
+    const popularOrder = [
+      'Matcha Cookies',
+      'Coconut Matcha',
+      'Matcha Cloud',
+      'Blueberry Matcha',
+      'Honey Matcha',
+      'Matcha Latte',
+      'Matcha Frappe',
+      'Green Tea',
+      'Matcha Smoothie',
+      'Iced Matcha'
+    ];
+    const idx = popularOrder.findIndex(name => 
+      product.nama_produk.toLowerCase().includes(name.toLowerCase()) || 
+      name.toLowerCase().includes(product.nama_produk.toLowerCase())
+    );
+    return idx >= 0 ? idx + 1 : 99;
+  };
 
   const subtotal = cart.reduce((acc, item) => acc + (item.harga * item.qty), 0);
   const tax = subtotal * 0.1;
@@ -218,13 +214,19 @@ const POS = () => {
     setShowPaymentModal(true);
   };
 
-  const handleMarkAllAsRead = () => {
-    setUnreadCount(0);
+  const handleCancelOrder = () => {
+    if (cart.length === 0) return;
+    setShowCancelModal(true);
   };
 
-  const handleNotificationClick = (link) => {
-    setShowNotifications(false);
-    navigate(link);
+  const confirmCancelOrder = () => {
+    setCart([]);
+    setShowCancelModal(false);
+    setShowPaymentModal(false);
+    setShowCashModal(false);
+    setShowPaymentDetailsModal(false);
+    setPaymentData(null);
+    setCurrentPaymentMethod(null);
   };
 
   const handlePaymentMethodSelect = async (paymentMethod) => {
@@ -324,6 +326,10 @@ const POS = () => {
         // Clear cart
         setCart([]);
         
+        // Notify Products page that stock has changed
+        window.dispatchEvent(new CustomEvent('productsUpdated'));
+        localStorage.setItem('products_last_updated', Date.now().toString());
+        
         // Show receipt modal
         setReceiptData(receipt);
         setShowReceiptModal(true);
@@ -354,65 +360,15 @@ const POS = () => {
             <span className="search-hint">Ctrl + K</span>
           </div>
           <div className="pos-top-actions">
-            <div className="notification-wrapper" style={{ position: 'relative' }}>
-              <button className="notif-btn" onClick={() => setShowNotifications(!showNotifications)}>
-                <Bell size={20} />
-                {unreadCount > 0 && <span className="notif-badge">{unreadCount}</span>}
-              </button>
-              {showNotifications && (
-                <div className="dropdown-menu notification-dropdown" style={{ right: 0, top: '100%' }}>
-                  <div className="dropdown-header">
-                    <span>Notifications</span>
-                    <button className="mark-read" onClick={handleMarkAllAsRead}>Mark all as read</button>
-                  </div>
-                  <div className="notification-list">
-                    {notifications.length > 0 ? (
-                      notifications.map(n => (
-                        <div key={n.id} className="notif-item" onClick={() => handleNotificationClick(n.link)}>
-                          <div className={`notif-icon ${n.type}`}>{n.icon}</div>
-                          <div className="notif-info">
-                            <p className="notif-text">{n.text}</p>
-                            <span className="notif-time">{n.time}</span>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div style={{ padding: '2rem', textAlign: 'center', color: '#999', fontSize: '13px' }}>
-                        No new notifications
-                      </div>
-                    )}
-                  </div>
-                  <div className="dropdown-footer">
-                    <button onClick={() => handleNotificationClick('/reports')}>View all activity</button>
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
         </header>
 
         <div className="pos-content-grid">
           <section className="pos-catalog">
             <div className="catalog-header">
-              <aside className="pos-cat-nav">
-                <div className="cat-title">CATEGORIES</div>
-                <ul className="cat-list">
-                  {categories.map((cat, idx) => (
-                    <li 
-                      key={idx} 
-                      className={selectedCategory === cat ? 'active' : ''}
-                      onClick={() => { setSelectedCategory(cat); setCurrentPage(1); }}
-                    >
-                      <span>{cat}</span>
-                      <span className="count">{cat === 'All' ? products.length : products.filter(p => p.kategori === cat).length}</span>
-                    </li>
-                  ))}
-                </ul>
-              </aside>
-
-              <div className="product-view-area">
+              <div className="product-view-area" style={{ border: 'none' }}>
                 <div className="view-header">
-                  <h3>{selectedCategory} <span className="total-count">({processedProducts.length})</span></h3>
+                  <h3>Products <span className="total-count">({processedProducts.length})</span></h3>
                   <div className="view-controls">
                     <div className="grid-toggle">
                       <button className={viewMode === 'grid' ? 'active' : ''} onClick={() => setViewMode('grid')}>
@@ -441,8 +397,16 @@ const POS = () => {
                 </div>
 
                 <div className={viewMode === 'grid' ? 'pos-grid' : 'pos-list'}>
-                  {currentProducts.map((p) => (
-                    <div key={p.id_produk} className="pos-product-card">
+                  {currentProducts.map((p) => {
+                    const rank = getPopularRank(p);
+                    const isPopular = rank <= 3;
+                    return (
+                    <div key={p.id_produk} className={`pos-product-card ${isPopular ? 'popular' : ''}`}>
+                      {isPopular && (
+                        <div className="popular-badge">
+                          {rank === 1 ? '🔥 Paling Populer' : rank === 2 ? '⭐ Populer' : '👍 Populer'}
+                        </div>
+                      )}
                       <div className="p-img">
                         {p.gambar ? (
                           <img src={p.gambar} alt={p.nama_produk} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -459,7 +423,8 @@ const POS = () => {
                         </div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 <footer className="pos-pagination">
@@ -541,13 +506,22 @@ const POS = () => {
             </div>
 
             <div className="pos-actions">
-              <button 
-                className="checkout-btn" 
-                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
-                onClick={handleCheckout}
-              >
-                <CreditCard size={20}/> Bayar {formatRupiah(total)}
-              </button>
+              <div className="pos-action-row">
+                <button 
+                  className="cancel-btn"
+                  onClick={handleCancelOrder}
+                  disabled={cart.length === 0}
+                >
+                  <X size={18}/> Batal
+                </button>
+                <button 
+                  className="checkout-btn" 
+                  onClick={handleCheckout}
+                  disabled={cart.length === 0}
+                >
+                  <CreditCard size={20}/> Bayar {formatRupiah(total)}
+                </button>
+              </div>
             </div>
           </aside>
         </div>
@@ -567,7 +541,11 @@ const POS = () => {
               </div>
               <div className="payment-methods-grid">
                 {paymentMethods.length > 0 ? (
-                  paymentMethods.map((method) => (
+                  [...paymentMethods].sort((a, b) => {
+                    // Cash di atas, QRIS kedua, VA di bawah
+                    const order = { cash: 0, qris: 1, va: 2 };
+                    return (order[a.type] ?? 3) - (order[b.type] ?? 3);
+                  }).map((method) => (
                     <button 
                       key={method.id} 
                       className="payment-method-btn" 
@@ -634,6 +612,11 @@ const POS = () => {
             };
             
             setCart([]);
+            
+            // Notify Products page that stock has changed
+            window.dispatchEvent(new CustomEvent('productsUpdated'));
+            localStorage.setItem('products_last_updated', Date.now().toString());
+            
             setReceiptData(receipt);
             setShowReceiptModal(true);
           }}
@@ -656,10 +639,32 @@ const POS = () => {
       {showCashModal && (
         <CashScannerModal 
           show={showCashModal}
-          onClose={() => setShowCashModal(false)}
+          onClose={() => {
+            setShowCashModal(false);
+            setCart([]);
+          }}
           total={total}
           onComplete={handleCashPayment}
         />
+      )}
+
+      {/* Cancel Confirmation Modal */}
+      {showCancelModal && (
+        <div className="payment-modal-overlay" onClick={() => setShowCancelModal(false)}>
+          <div className="confirm-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="confirm-icon">❌</div>
+            <h3>Batalkan Pesanan?</h3>
+            <p>Apakah Anda yakin ingin membatalkan pesanan ini? Semua item di keranjang akan dihapus.</p>
+            <div className="confirm-actions">
+              <button className="confirm-no-btn" onClick={() => setShowCancelModal(false)}>
+                Kembali
+              </button>
+              <button className="confirm-yes-btn" onClick={confirmCancelOrder}>
+                Ya, Batalkan
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -849,13 +854,15 @@ const PaymentDetailsModal = ({ show, onClose, paymentData, paymentMethod, total,
 const CashScannerModal = ({ show, onClose, total, onComplete }) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const streamRef = useRef(null);
   const [received, setReceived] = useState(0);
   const [scanning, setScanning] = useState(false);
   const [status, setStatus] = useState('Arahkan uang ke kamera...');
-  const [stream, setStream] = useState(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [detectedMoney, setDetectedMoney] = useState([]); 
-  const [lastAnalysis, setLastAnalysis] = useState(null); 
+  const [lastAnalysis, setLastAnalysis] = useState(null);
+  const [cameras, setCameras] = useState([]);
+  const [selectedCameraId, setSelectedCameraId] = useState('');
   
   const change = received - total;
   
@@ -865,46 +872,111 @@ const CashScannerModal = ({ show, onClose, total, onComplete }) => {
 
   useEffect(() => {
     if (show) {
-      startCamera();
+      loadCameras();
     }
     return () => {
       stopCamera();
     };
   }, [show]);
 
-  const startCamera = async () => {
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCameraReady(false);
+  };
+
+  const openCamera = async (deviceId) => {
+    stopCamera();
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: 'environment',
+          deviceId: { exact: deviceId },
           width: { ideal: 1280 },
           height: { ideal: 720 }
         }
       });
       
+      streamRef.current = mediaStream;
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
-        setStream(mediaStream);
         setCameraReady(true);
-        setStatus('Kamera siap. Arahkan uang ke kamera dan klik Scan.');
+      }
+      return true;
+    } catch (error) {
+      console.error('Camera error:', error);
+      setCameraReady(false);
+      return false;
+    }
+  };
+
+  const loadCameras = async () => {
+    try {
+      // Minta permission supaya label device muncul
+      const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      tempStream.getTracks().forEach(t => t.stop());
+      
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(d => d.kind === 'videoinput');
+      
+      // Sort: Iriun di atas
+      videoDevices.sort((a, b) => {
+        const aIriun = a.label.toLowerCase().includes('iriun');
+        const bIriun = b.label.toLowerCase().includes('iriun');
+        if (aIriun && !bIriun) return -1;
+        if (!aIriun && bIriun) return 1;
+        return 0;
+      });
+      
+      setCameras(videoDevices);
+      
+      // Auto pilih Iriun atau kamera pertama
+      const iriun = videoDevices.find(d => d.label.toLowerCase().includes('iriun'));
+      const defaultCam = iriun || videoDevices[0];
+      
+      if (defaultCam) {
+        setSelectedCameraId(defaultCam.deviceId);
+        const ok = await openCamera(defaultCam.deviceId);
+        if (ok) {
+          setStatus(`Kamera siap (${defaultCam.label}). Arahkan uang ke kamera dan klik Scan.`);
+        } else {
+          setStatus('❌ Gagal membuka kamera. Coba pilih kamera lain.');
+        }
+      } else {
+        setStatus('❌ Tidak ada kamera terdeteksi.');
       }
     } catch (error) {
       console.error('Camera error:', error);
       setStatus('❌ Gagal mengakses kamera. Pastikan izin kamera diberikan.');
-      setCameraReady(false);
     }
   };
 
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      setStream(null);
+  const handleCameraChange = async (e) => {
+    const deviceId = e.target.value;
+    setSelectedCameraId(deviceId);
+    
+    const cam = cameras.find(c => c.deviceId === deviceId);
+    const name = cam ? cam.label : 'Kamera';
+    
+    setStatus('Beralih kamera...');
+    const ok = await openCamera(deviceId);
+    if (ok) {
+      setStatus(`Kamera siap (${name}). Arahkan uang ke kamera dan klik Scan.`);
+    } else {
+      setStatus('❌ Gagal membuka kamera. Coba kamera lain.');
     }
   };
 
   const detectMoneyWithAI = async (imageData) => {
     try {
-      const response = await fetch('http://localhost/testtt/api/detect_money.php', {
+      // Detect money URL derived from API_URL
+      const apiBase = import.meta.env.VITE_API_URL || '/api/index.php';
+      const detectUrl = apiBase.replace(/\/[^/]+$/, '/detect_money.php');
+      const response = await fetch(detectUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: imageData })
@@ -994,6 +1066,37 @@ const CashScannerModal = ({ show, onClose, total, onComplete }) => {
           <button className="close-btn" onClick={() => { stopCamera(); onClose(); }}>×</button>
         </div>
         <div className="modal-body">
+          {/* Dropdown pilihan kamera - selalu tampil */}
+          {cameras.length > 0 && (
+            <div style={{ marginBottom: '0.75rem' }}>
+              <label style={{ display: 'block', fontSize: '0.8rem', color: '#666', marginBottom: '0.3rem' }}>
+                📷 Pilih Kamera:
+              </label>
+              <select
+                value={selectedCameraId}
+                onChange={handleCameraChange}
+                style={{
+                  width: '100%',
+                  padding: '0.5rem',
+                  borderRadius: '6px',
+                  border: '1px solid #ddd',
+                  fontSize: '0.9rem',
+                  background: '#fff'
+                }}
+              >
+                {cameras.map(cam => {
+                  const isIriun = cam.label.toLowerCase().includes('iriun');
+                  const label = cam.label || `Kamera ${cam.deviceId.slice(0, 8)}...`;
+                  return (
+                    <option key={cam.deviceId} value={cam.deviceId}>
+                      {isIriun ? `⭐ ${label} (HP)` : label}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+          )}
+          
           <div className="camera-container">
             <video 
               ref={videoRef}

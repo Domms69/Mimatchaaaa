@@ -6,21 +6,17 @@
  */
 
 header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit;
 }
 
-require_once '../config.php';
+require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/pakasir_config.php';
 
-// Pakasir.com Configuration
-define('PAKASIR_API_KEY', 'j6Md3oJGJm4CP16fVL2rWFv3ZroEI7ta');
-define('PAKASIR_BASE_URL', 'https://api.pakasir.com/v1');
-define('WEBHOOK_URL', 'https://surrogate-rascal-idealness.ngrok-free.dev/testtt/api/payment.php?action=webhook'); // Will be updated with ngrok URL
+// Payment-specific API base URL (berbeda dengan PAKASIR_BASE_URL dari pakasir_config)
+define('PAKASIR_API_V1_URL', getenv('PAKASIR_API_V1_URL') ?: 'https://api.pakasir.com/v1');
 
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
@@ -28,7 +24,7 @@ $action = $_GET['action'] ?? $_POST['action'] ?? '';
  * Helper function to call Pakasir API
  */
 function callPakasirAPI($endpoint, $method = 'POST', $data = null) {
-    $url = PAKASIR_BASE_URL . $endpoint;
+    $url = PAKASIR_API_V1_URL . $endpoint;
     
     $headers = [
         'Content-Type: application/json',
@@ -119,11 +115,12 @@ if ($action === 'create_payment') {
             $pakasir_id = $pakasirResponse['data']['id'] ?? '';
             $response_json = json_encode($pakasirResponse);
             
-            $stmt->bind_param("isssdssss", $id_pesanan, $payment_reference, $payment_method, $amount, $qr_code_url, $qr_string, $expired_at, $pakasir_id, $response_json);
-            
-            if ($stmt->execute()) {
+            try {
+                $stmt->execute([$id_pesanan, $payment_reference, $payment_method, $amount, $qr_code_url, $qr_string, $expired_at, $pakasir_id, $response_json]);
+                
                 // Update pesanan with payment reference
-                $conn->query("UPDATE pesanan SET payment_reference = '$payment_reference' WHERE id_pesanan = $id_pesanan");
+                $stmtUpd = $conn->prepare("UPDATE pesanan SET payment_reference = ? WHERE id_pesanan = ?");
+                $stmtUpd->execute([$payment_reference, $id_pesanan]);
                 
                 echo json_encode([
                     'success' => true,
@@ -135,7 +132,7 @@ if ($action === 'create_payment') {
                     'expired_at' => $expired_at,
                     'pakasir_data' => $pakasirResponse['data'] ?? []
                 ]);
-            } else {
+            } catch (Exception $e) {
                 echo json_encode(['success' => false, 'error' => 'Failed to save payment transaction']);
             }
         } else {
@@ -160,11 +157,12 @@ if ($action === 'create_payment') {
             $pakasir_id = $pakasirResponse['data']['id'] ?? '';
             $response_json = json_encode($pakasirResponse);
             
-            $stmt->bind_param("issdssss", $id_pesanan, $payment_reference, $payment_method, $amount, $va_number, $va_bank, $expired_at, $pakasir_id, $response_json);
-            
-            if ($stmt->execute()) {
+            try {
+                $stmt->execute([$id_pesanan, $payment_reference, $payment_method, $amount, $va_number, $va_bank, $expired_at, $pakasir_id, $response_json]);
+                
                 // Update pesanan with payment reference
-                $conn->query("UPDATE pesanan SET payment_reference = '$payment_reference' WHERE id_pesanan = $id_pesanan");
+                $stmtUpd = $conn->prepare("UPDATE pesanan SET payment_reference = ? WHERE id_pesanan = ?");
+                $stmtUpd->execute([$payment_reference, $id_pesanan]);
                 
                 echo json_encode([
                     'success' => true,
@@ -176,7 +174,7 @@ if ($action === 'create_payment') {
                     'expired_at' => $expired_at,
                     'pakasir_data' => $pakasirResponse['data'] ?? []
                 ]);
-            } else {
+            } catch (Exception $e) {
                 echo json_encode(['success' => false, 'error' => 'Failed to save payment transaction']);
             }
         } else {
@@ -201,9 +199,8 @@ if ($action === 'check_payment_status') {
     
     // Get from database
     $stmt = $conn->prepare("SELECT * FROM payment_transactions WHERE payment_reference = ?");
-    $stmt->bind_param("s", $payment_reference);
-    $stmt->execute();
-    $result = $stmt->get_result()->fetch_assoc();
+    $stmt->execute([$payment_reference]);
+    $result = $stmt->fetch();
     
     if (!$result) {
         echo json_encode(['success' => false, 'error' => 'Payment not found']);
@@ -222,8 +219,10 @@ if ($action === 'check_payment_status') {
             // Update database if status changed
             if ($status === 'paid' && $result['status'] !== 'paid') {
                 $paid_at = date('Y-m-d H:i:s');
-                $conn->query("UPDATE payment_transactions SET status = 'paid', paid_at = '$paid_at' WHERE payment_reference = '$payment_reference'");
-                $conn->query("UPDATE pesanan SET status_pesanan = 'lunas' WHERE payment_reference = '$payment_reference'");
+                $stmtUpd1 = $conn->prepare("UPDATE payment_transactions SET status = 'paid', paid_at = ? WHERE payment_reference = ?");
+                $stmtUpd1->execute([$paid_at, $payment_reference]);
+                $stmtUpd2 = $conn->prepare("UPDATE pesanan SET status_pesanan = 'lunas' WHERE payment_reference = ?");
+                $stmtUpd2->execute([$payment_reference]);
             }
             
             $result['status'] = $status;
@@ -250,8 +249,7 @@ if ($action === 'webhook') {
     $payment_ref = $webhookData['external_id'] ?? '';
     $event_type = $webhookData['event'] ?? 'payment_notification';
     $webhook_json = json_encode($webhookData);
-    $stmt->bind_param("sssss", $payment_ref, $event_type, $webhook_json, $ip_address, $user_agent);
-    $stmt->execute();
+    $stmt->execute([$payment_ref, $event_type, $webhook_json, $ip_address, $user_agent]);
     
     // Process webhook
     if ($payment_ref && isset($webhookData['status'])) {
@@ -261,17 +259,22 @@ if ($action === 'webhook') {
             $paid_at = date('Y-m-d H:i:s');
             
             // Update payment transaction
-            $conn->query("UPDATE payment_transactions SET status = 'paid', paid_at = '$paid_at' WHERE payment_reference = '$payment_ref'");
+            $stmtUpd1 = $conn->prepare("UPDATE payment_transactions SET status = 'paid', paid_at = ? WHERE payment_reference = ?");
+            $stmtUpd1->execute([$paid_at, $payment_ref]);
             
             // Update order status
-            $conn->query("UPDATE pesanan SET status_pesanan = 'lunas' WHERE payment_reference = '$payment_ref'");
+            $stmtUpd2 = $conn->prepare("UPDATE pesanan SET status_pesanan = 'lunas' WHERE payment_reference = ?");
+            $stmtUpd2->execute([$payment_ref]);
             
             // Mark webhook as processed
-            $conn->query("UPDATE payment_webhooks SET processed = TRUE WHERE payment_reference = '$payment_ref' ORDER BY id DESC LIMIT 1");
+            $stmtUpd3 = $conn->prepare("UPDATE payment_webhooks SET processed = TRUE WHERE id = (SELECT id FROM (SELECT id FROM payment_webhooks WHERE payment_reference = ? ORDER BY id DESC LIMIT 1) sub)");
+            $stmtUpd3->execute([$payment_ref]);
         } elseif ($status === 'expired') {
-            $conn->query("UPDATE payment_transactions SET status = 'expired' WHERE payment_reference = '$payment_ref'");
+            $stmtUpd = $conn->prepare("UPDATE payment_transactions SET status = 'expired' WHERE payment_reference = ?");
+            $stmtUpd->execute([$payment_ref]);
         } elseif ($status === 'failed') {
-            $conn->query("UPDATE payment_transactions SET status = 'failed' WHERE payment_reference = '$payment_ref'");
+            $stmtUpd = $conn->prepare("UPDATE payment_transactions SET status = 'failed' WHERE payment_reference = ?");
+            $stmtUpd->execute([$payment_ref]);
         }
     }
     
@@ -288,11 +291,10 @@ if ($action === 'get_payment_history') {
     
     if ($id_pesanan) {
         $stmt = $conn->prepare("SELECT * FROM payment_transactions WHERE id_pesanan = ? ORDER BY created_at DESC");
-        $stmt->bind_param("i", $id_pesanan);
-        $stmt->execute();
-        $result = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->execute([$id_pesanan]);
+        $result = $stmt->fetchAll();
     } else {
-        $result = $conn->query("SELECT pt.*, p.tanggal_pesanan, pel.nama as customer_name FROM payment_transactions pt LEFT JOIN pesanan p ON pt.id_pesanan = p.id_pesanan LEFT JOIN pelanggan pel ON p.id_pelanggan = pel.id_pelanggan ORDER BY pt.created_at DESC LIMIT 50")->fetch_all(MYSQLI_ASSOC);
+        $result = $conn->query("SELECT pt.*, p.tanggal_pesanan, pel.nama as customer_name FROM payment_transactions pt LEFT JOIN pesanan p ON pt.id_pesanan = p.id_pesanan LEFT JOIN pelanggan pel ON p.id_pelanggan = pel.id_pelanggan ORDER BY pt.created_at DESC LIMIT 50")->fetchAll();
     }
     
     echo json_encode(['success' => true, 'payments' => $result]);
@@ -310,7 +312,8 @@ if ($action === 'cancel_payment') {
         exit;
     }
     
-    $conn->query("UPDATE payment_transactions SET status = 'cancelled' WHERE payment_reference = '$payment_reference'");
+    $stmtUpd = $conn->prepare("UPDATE payment_transactions SET status = 'cancelled' WHERE payment_reference = ?");
+    $stmtUpd->execute([$payment_reference]);
     
     echo json_encode(['success' => true, 'message' => 'Payment cancelled']);
     exit;
@@ -319,4 +322,3 @@ if ($action === 'cancel_payment') {
 // Default response
 echo json_encode(['success' => false, 'error' => 'Unknown action']);
 ?>
-

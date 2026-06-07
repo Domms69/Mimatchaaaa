@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  TrendingUp, TrendingDown, Users, ShoppingBag, 
-  DollarSign, MoreHorizontal, AlertCircle, Bell, Search, Calendar, ChevronDown, Check, X,
-  Package, Activity, FileText
+  TrendingUp, Users, ShoppingBag, 
+  MoreHorizontal, AlertCircle,
+  Clock, ShoppingCart, BarChart3
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, 
@@ -27,11 +27,7 @@ const Dashboard = () => {
   });
   const [loading, setLoading] = useState(true);
   const [salesData, setSalesData] = useState([]);
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [selectedPeriod, setSelectedPeriod] = useState('This Week (May 12 - May 18)');
-  const [notifications, setNotifications] = useState([]);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [lowStockCount, setLowStockCount] = useState(0);
 
   useEffect(() => {
     loadDashboardData();
@@ -58,69 +54,11 @@ const Dashboard = () => {
         setSalesData(chartData);
       }
 
-      // Generate Real Notifications
-      const newNotifications = [];
-      
-      // 1. Recent Orders Notifications (Last 3)
-      if (statsResult?.pesanan_terbaru) {
-        statsResult.pesanan_terbaru.slice(0, 3).forEach(order => {
-          newNotifications.push({
-            id: `order-${order.id_pesanan}`,
-            text: `New order #${order.id_pesanan} from ${order.nama_pelanggan || 'Guest'}`,
-            time: 'Recently',
-            icon: <ShoppingBag size={14}/>,
-            type: 'order',
-            link: '/orders'
-          });
-        });
-      }
-
-      // 2. Low Stock Notifications
+      // Hitung stok rendah
       if (inventoryResult) {
-        const lowStockItems = inventoryResult.filter(item => item.stok > 0 && item.stok <= 10);
-        if (lowStockItems.length > 0) {
-          newNotifications.push({
-            id: 'low-stock-alert',
-            text: `${lowStockItems.length} items are running low on stock`,
-            time: 'Check Now',
-            icon: <AlertCircle size={14}/>,
-            type: 'alert',
-            link: '/inventory'
-          });
-        }
+        const lowStock = inventoryResult.filter(item => item.stok > 0 && item.stok <= 10);
+        setLowStockCount(lowStock.length);
       }
-
-      // 3. Notifikasi Kontrak Akan Berakhir
-      if (expiringContractsResult && expiringContractsResult.length > 0) {
-        expiringContractsResult.forEach(contract => {
-          const daysLeft = Math.ceil(
-            (new Date(contract.masa_berlaku) - new Date()) / (1000 * 60 * 60 * 24)
-          );
-          newNotifications.push({
-            id: `contract-${contract.id_kontrak}`,
-            text: `Kontrak ${contract.nomor_kontrak} berakhir dalam ${daysLeft} hari`,
-            time: `${daysLeft} hari lagi`,
-            icon: <AlertCircle size={14}/>,
-            type: 'warning',
-            link: `/contracts/${contract.id_kontrak}`
-          });
-        });
-      }
-
-      // 3. Analytics Insight
-      if (analyticsResult?.penjualan) {
-        newNotifications.push({
-          id: 'report-ready',
-          text: 'Weekly sales report is ready for review',
-          time: 'Today',
-          icon: <Activity size={14}/>,
-          type: 'report',
-          link: '/reports'
-        });
-      }
-
-      setNotifications(newNotifications);
-      setUnreadCount(newNotifications.length);
 
     } catch (error) {
       console.error('Error loading dashboard:', error);
@@ -129,136 +67,103 @@ const Dashboard = () => {
     }
   };
 
-  const handleMarkAllAsRead = () => {
-    setUnreadCount(0);
-  };
-
-  const handleNotificationClick = (link) => {
-    setShowNotifications(false);
-    navigate(link);
-  };
-
   const getStatusBadge = (status) => {
     const statusMap = {
-      'lunas': { label: 'Selesai', class: 'completed' },
-      'pending': { label: 'Menunggu', class: 'pending' },
-      'batal': { label: 'Batal', class: 'cancelled' }
+      'lunas': { label: 'Lunas', class: 'completed' },
+      'pending': { label: 'Pending', class: 'pending' },
+      'batal': { label: 'Dibatalkan', class: 'cancelled' },
+      'selesai': { label: 'Selesai', class: 'completed' },
+      'diproses': { label: 'Diproses', class: 'processing' }
     };
     return statusMap[status] || { label: status, class: 'pending' };
   };
 
   if (loading) {
-    return <div style={{ padding: '2rem', textAlign: 'center' }}>Loading...</div>;
+    return (
+      <div className="dashboard-loading">
+        <div className="loading-spinner-dash"></div>
+        <p>Memuat dashboard...</p>
+      </div>
+    );
   }
+
+  const today = new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
   return (
     <>
       <header className="main-header">
         <div className="header-left">
-          <h1 className="page-title">Dashboard</h1>
-          <p className="page-subtitle">Welcome back, Admin! Here's what's happening with your store today.</p>
+          <div className="greeting-section">
+            <h1 className="page-title">Selamat Datang, Admin 👋</h1>
+            <p className="page-subtitle">Ringkasan bisnis MiMatcha Anda hari ini</p>
+          </div>
+          <div className="header-date">
+            <Clock size={14} />
+            <span>{today}</span>
+          </div>
         </div>
         <div className="header-right">
-          <div className="date-picker-wrapper" style={{ position: 'relative' }}>
-            <div className="date-picker" onClick={() => setShowDatePicker(!showDatePicker)}>
-              <Calendar size={18} />
-              <span>{selectedPeriod}</span>
-              <ChevronDown size={16} />
-            </div>
-            {showDatePicker && (
-              <div className="dropdown-menu date-dropdown">
-                <div className="dropdown-item" onClick={() => { setSelectedPeriod('Today'); setShowDatePicker(false); }}>Today</div>
-                <div className="dropdown-item" onClick={() => { setSelectedPeriod('This Week (May 12 - May 18)'); setShowDatePicker(false); }}>This Week</div>
-                <div className="dropdown-item" onClick={() => { setSelectedPeriod('This Month (May)'); setShowDatePicker(false); }}>This Month</div>
-                <div className="dropdown-item" onClick={() => { setSelectedPeriod('This Year (2025)'); setShowDatePicker(false); }}>This Year</div>
-              </div>
-            )}
-          </div>
-
-          <div className="notification-wrapper" style={{ position: 'relative' }}>
-            <button className="notification-btn" onClick={() => setShowNotifications(!showNotifications)}>
-              <Bell size={20} />
-              {unreadCount > 0 && <span className="badge">{unreadCount}</span>}
-            </button>
-            {showNotifications && (
-              <div className="dropdown-menu notification-dropdown">
-                <div className="dropdown-header">
-                  <span>Notifications</span>
-                  <button className="mark-read" onClick={handleMarkAllAsRead}>Mark all as read</button>
-                </div>
-                <div className="notification-list">
-                  {notifications.length > 0 ? (
-                    notifications.map(n => (
-                      <div key={n.id} className="notif-item" onClick={() => handleNotificationClick(n.link)}>
-                        <div className={`notif-icon ${n.type}`}>{n.icon}</div>
-                        <div className="notif-info">
-                          <p className="notif-text">{n.text}</p>
-                          <span className="notif-time">{n.time}</span>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div style={{ padding: '2rem', textAlign: 'center', color: '#999', fontSize: '13px' }}>
-                      No new notifications
-                    </div>
-                  )}
-                </div>
-                <div className="dropdown-footer">
-                  <button onClick={() => handleNotificationClick('/reports')}>View all activity</button>
-                </div>
-              </div>
-            )}
+          <div className="admin-avatar">
+            <span>MA</span>
           </div>
         </div>
       </header>
 
       <section className="stats-grid">
-        <StatCard title="Pendapatan Hari Ini" value={formatRupiah(stats.pendapatan_hari_ini)} trend="+12.5%" icon={<ShoppingBag />} color="green" />
-        <StatCard title="Pesanan Hari Ini" value={stats.total_pesanan_hari_ini.toString()} trend="+8.3%" icon={<DollarSign />} color="orange" />
-        <StatCard title="Total Pelanggan" value={stats.total_pelanggan.toString()} trend="+6.7%" icon={<Users />} color="blue" />
-        <StatCard title="Pendapatan Bulan Ini" value={formatRupiah(stats.pendapatan_bulan)} trend="+15.2%" icon={<TrendingUp />} color="purple" />
+        <StatCard title="Pendapatan Hari Ini" value={formatRupiah(stats.pendapatan_hari_ini)} trend="dari kemarin" icon={<ShoppingBag size={20} />} color="green" />
+        <StatCard title="Pesanan Hari Ini" value={stats.total_pesanan_hari_ini.toString()} trend="dari kemarin" icon={<ShoppingCart size={20} />} color="blue" />
+        <StatCard title="Total Pelanggan" value={stats.total_pelanggan.toString()} trend="pelanggan terdaftar" icon={<Users size={20} />} color="purple" />
+        <StatCard title="Pendapatan Bulan Ini" value={formatRupiah(stats.pendapatan_bulan)} trend="dari bulan lalu" icon={<BarChart3 size={20} />} color="orange" />
       </section>
 
       <section className="charts-grid">
         <div className="chart-card">
           <div className="chart-header">
-            <h3>Sales Overview</h3>
-            <select className="chart-select"><option>This Week</option></select>
+            <h3>Ringkasan Penjualan</h3>
+            <span className="chart-badge">Minggu Ini</span>
           </div>
           <div className="chart-container">
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={salesData}>
-                <defs>
-                  <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#4c632d" stopOpacity={0.1}/>
-                    <stop offset="95%" stopColor="#4c632d" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#999', fontSize: 12}} />
-                <YAxis axisLine={false} tickLine={false} tick={{fill: '#999', fontSize: 12}} />
-                <Tooltip />
-                <Area type="monotone" dataKey="sales" stroke="#4c632d" strokeWidth={2} fillOpacity={1} fill="url(#colorSales)" />
-              </AreaChart>
-            </ResponsiveContainer>
+            {salesData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <AreaChart data={salesData}>
+                  <defs>
+                    <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#4c632d" stopOpacity={0.12}/>
+                      <stop offset="95%" stopColor="#4c632d" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#999', fontSize: 12}} />
+                  <YAxis axisLine={false} tickLine={false} tick={{fill: '#999', fontSize: 12}} />
+                  <Tooltip />
+                  <Area type="monotone" dataKey="sales" stroke="#4c632d" strokeWidth={2} fillOpacity={1} fill="url(#colorSales)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="chart-empty">Belum ada data penjualan</div>
+            )}
           </div>
         </div>
         
         <div className="chart-card">
           <div className="chart-header">
-            <h3>Orders Overview</h3>
-            <select className="chart-select"><option>This Week</option></select>
+            <h3>Ringkasan Pesanan</h3>
+            <span className="chart-badge">Minggu Ini</span>
           </div>
           <div className="chart-container">
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={salesData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#999', fontSize: 12}} />
-                <YAxis axisLine={false} tickLine={false} tick={{fill: '#999', fontSize: 12}} />
-                <Tooltip />
-                <Line type="monotone" dataKey="sales" stroke="#4c632d" strokeWidth={2} dot={{fill: '#4c632d', r: 4}} activeDot={{r: 6}} />
-              </LineChart>
-            </ResponsiveContainer>
+            {salesData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={salesData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#999', fontSize: 12}} />
+                  <YAxis axisLine={false} tickLine={false} tick={{fill: '#999', fontSize: 12}} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="sales" stroke="#4c632d" strokeWidth={2} dot={{fill: '#4c632d', r: 4, strokeWidth: 0}} activeDot={{r: 6}} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="chart-empty">Belum ada data pesanan</div>
+            )}
           </div>
         </div>
       </section>
@@ -266,16 +171,16 @@ const Dashboard = () => {
       <section className="bottom-grid">
         <div className="table-card">
           <div className="card-header">
-            <h3>Recent Orders</h3>
-            <button className="view-all" onClick={() => navigate('/orders')}>View All Orders</button>
+            <h3>Pesanan Terbaru</h3>
+            <button className="view-all" onClick={() => navigate('/orders')}>Lihat Semua</button>
           </div>
           <div className="table-responsive">
             <table className="orders-table">
               <thead>
                 <tr>
-                  <th>Order ID</th>
-                  <th>Customer</th>
-                  <th>Date</th>
+                  <th>ID Pesanan</th>
+                  <th>Pelanggan</th>
+                  <th>Tanggal</th>
                   <th>Status</th>
                   <th>Total</th>
                   <th></th>
@@ -288,10 +193,11 @@ const Dashboard = () => {
                     return (
                       <tr key={idx}>
                         <td className="order-id">#{order.id_pesanan}</td>
-                        <td>{order.nama_pelanggan || 'Guest'}</td>
-                        <td className="date-cell">{new Date(order.tanggal_pesanan).toLocaleDateString('id-ID')}</td>
+                        <td>{order.nama_pelanggan || 'Tamu'}</td>
+                        <td className="date-cell">{new Date(order.tanggal_pesanan).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
                         <td>
                           <span className={`status-badge ${statusInfo.class}`}>
+                            <span className="status-dot"></span>
                             {statusInfo.label}
                           </span>
                         </td>
@@ -302,7 +208,7 @@ const Dashboard = () => {
                   })
                 ) : (
                   <tr>
-                    <td colSpan="6" style={{textAlign: 'center', padding: '2rem', color: '#999'}}>
+                    <td colSpan="6" className="empty-table">
                       Belum ada pesanan
                     </td>
                   </tr>
@@ -315,26 +221,15 @@ const Dashboard = () => {
         <div className="side-cards">
           <div className="product-card">
             <div className="card-header">
-              <h3>Top Selling Products</h3>
-              <button className="view-all" onClick={() => navigate('/products')}>View All</button>
+              <h3>Produk Terlaris</h3>
+              <button className="view-all" onClick={() => navigate('/products')}>Lihat Semua</button>
             </div>
             <ul className="product-list">
               {stats.produk_terlaris && stats.produk_terlaris.length > 0 ? (
                 stats.produk_terlaris.map((product, idx) => (
                   <li key={idx} className="product-item">
-                    <div className="rank">{idx + 1}</div>
-                    <div className="product-img" style={{
-                      width: '40px',
-                      height: '40px',
-                      borderRadius: '8px',
-                      background: 'linear-gradient(135deg, #4c632d, #6b8e23)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'white',
-                      fontWeight: 'bold',
-                      fontSize: '14px'
-                    }}>
+                    <div className={`rank rank-${idx + 1}`}>{idx + 1}</div>
+                    <div className="product-img">
                       {product.nama_produk.charAt(0)}
                     </div>
                     <div className="product-info">
@@ -343,30 +238,37 @@ const Dashboard = () => {
                     </div>
                     <div className="product-stats">
                       <span className="sold-count">{product.total_terjual}</span>
-                      <span className="sold-label">Sold</span>
+                      <span className="sold-label">Terjual</span>
                     </div>
                   </li>
                 ))
               ) : (
-                <li style={{textAlign: 'center', padding: '2rem', color: '#999'}}>
-                  Belum ada data produk
-                </li>
+                <li className="empty-list">Belum ada data produk</li>
               )}
             </ul>
           </div>
 
           <div className="alert-card">
             <div className="card-header">
-              <h3>Low Stock Alerts</h3>
-              <button className="view-all" onClick={() => navigate('/inventory')}>View All</button>
+              <h3>Stok Menipis</h3>
+              <button className="view-all" onClick={() => navigate('/inventory')}>Lihat Semua</button>
             </div>
             <div className="alert-content">
               <div className="alert-icon-box">
                 <AlertCircle size={24} color="#e74c3c" />
               </div>
               <div className="alert-text">
-                <p>8 items are running low on stock.</p>
-                <span>Check inventory to restock.</span>
+                {lowStockCount > 0 ? (
+                  <>
+                    <p>{lowStockCount} item dengan stok menipis.</p>
+                    <span>Segera lakukan restok.</span>
+                  </>
+                ) : (
+                  <>
+                    <p>Semua stok dalam kondisi baik.</p>
+                    <span>Tidak ada item dengan stok rendah.</span>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -374,8 +276,8 @@ const Dashboard = () => {
       </section>
 
       <footer className="dashboard-footer">
-        <p>© 2025 QuickPOS. All rights reserved.</p>
-        <span>Version 1.0.0</span>
+        <p>© 2026 MiMatcha. Hak cipta dilindungi.</p>
+        <span>Versi 1.0.0</span>
       </footer>
     </>
   );
@@ -389,10 +291,11 @@ const StatCard = ({ title, value, trend, icon, color }) => (
     </div>
     <div className="stat-content">
       <h2 className="stat-value">{value}</h2>
-      <div className="stat-trend positive">
-        <TrendingUp size={14} /> 
-        <span>{trend}</span>
-        <span className="trend-label">from last week</span>
+      <div className="stat-trend">
+        <span className="trend-indicator positive">
+          <TrendingUp size={12} />
+        </span>
+        <span className="trend-label">{trend}</span>
       </div>
     </div>
   </div>

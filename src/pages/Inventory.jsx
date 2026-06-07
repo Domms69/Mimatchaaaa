@@ -269,7 +269,7 @@ const Inventory = () => {
 const EditInventoryModal = ({ item, onClose, onSave }) => {
   const [formData, setFormData] = useState(item || {
     nama_produk: '',
-    kategori: 'Beverages',
+    kategori: 'Matcha',
     harga: '',
     stok: '',
     image: null
@@ -343,12 +343,7 @@ const EditInventoryModal = ({ item, onClose, onSave }) => {
                     value={formData.kategori} 
                     onChange={(e) => setFormData({ ...formData, kategori: e.target.value })}
                   >
-                    <option>Beverages</option>
                     <option>Matcha</option>
-                    <option>Accessories</option>
-                    <option>Equipment</option>
-                    <option>Merchandise</option>
-                    <option>Gift Sets</option>
                   </select>
                 </div>
                 <div className="form-field">

@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, LineChart, Line, AreaChart, Area
+  PieChart, Pie, Cell, LineChart, Line
 } from 'recharts';
 import { 
   TrendingUp, ShoppingBag, Calendar, 
-  ChevronDown, ArrowUpRight, Package, Download, RefreshCw, Printer
+  ArrowUpRight, Download, RefreshCw, Printer,
+  BarChart3, Inbox
 } from 'lucide-react';
 import api from '../api/service';
 
@@ -14,6 +15,7 @@ const COLORS = ['#4c632d', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444', '#10b981'
 const Analytics = () => {
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState('weekly');
+  const [chartType, setChartType] = useState('bar');
   const [salesData, setSalesData] = useState([]);
   const [categoryData, setCategoryData] = useState([]);
   const [topProducts, setTopProducts] = useState([]);
@@ -196,24 +198,46 @@ const Analytics = () => {
               <div className="card-header">
                 <h3>Revenue Growth</h3>
                 <div className="chart-type-toggle">
-                   <button className="active">Bar</button>
-                   <button>Line</button>
+                  <button className={chartType === 'bar' ? 'active' : ''} onClick={() => setChartType('bar')}>Bar</button>
+                  <button className={chartType === 'line' ? 'active' : ''} onClick={() => setChartType('line')}>Line</button>
                 </div>
               </div>
               <div className="chart-container-large">
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={salesData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#94a3b8'}} dy={10} />
-                    <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#94a3b8'}} tickFormatter={(v) => `Rp ${v/1000}k`} />
-                    <Tooltip 
-                      cursor={{fill: 'rgba(76, 99, 45, 0.05)'}}
-                      contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)'}}
-                      formatter={(v) => `Rp ${v.toLocaleString('id-ID')}`}
-                    />
-                    <Bar dataKey="sales" fill="var(--primary)" radius={[6, 6, 0, 0]} barSize={40} />
-                  </BarChart>
-                </ResponsiveContainer>
+                {salesData.length === 0 ? (
+                  <div className="chart-empty-state">
+                    <BarChart3 size={48} />
+                    <p>Belum ada data penjualan untuk periode ini</p>
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    {chartType === 'bar' ? (
+                      <BarChart data={salesData}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#94a3b8'}} dy={10} />
+                        <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#94a3b8'}} tickFormatter={(v) => `Rp ${v >= 1000000 ? (v/1000000).toFixed(1) + 'jt' : v >= 1000 ? (v/1000).toFixed(0) + 'rb' : v}`} />
+                        <Tooltip
+                          cursor={{fill: 'rgba(76, 99, 45, 0.05)'}}
+                          contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)'}}
+                          formatter={(v) => [`Rp ${Number(v).toLocaleString('id-ID')}`, 'Revenue']}
+                          labelFormatter={(label) => `Tanggal: ${label}`}
+                        />
+                        <Bar dataKey="sales" fill="var(--primary)" radius={[6, 6, 0, 0]} barSize={40} maxBarSize={60} />
+                      </BarChart>
+                    ) : (
+                      <LineChart data={salesData}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#94a3b8'}} dy={10} />
+                        <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#94a3b8'}} tickFormatter={(v) => `Rp ${v >= 1000000 ? (v/1000000).toFixed(1) + 'jt' : v >= 1000 ? (v/1000).toFixed(0) + 'rb' : v}`} />
+                        <Tooltip
+                          contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)'}}
+                          formatter={(v) => [`Rp ${Number(v).toLocaleString('id-ID')}`, 'Revenue']}
+                          labelFormatter={(label) => `Tanggal: ${label}`}
+                        />
+                        <Line type="monotone" dataKey="sales" stroke="var(--primary)" strokeWidth={3} dot={{fill: 'var(--primary)', strokeWidth: 2, r: 4}} activeDot={{r: 6}} />
+                      </LineChart>
+                    )}
+                  </ResponsiveContainer>
+                )}
               </div>
             </div>
 
@@ -221,27 +245,37 @@ const Analytics = () => {
               <div className="card-header">
                 <h3>Category Distribution</h3>
               </div>
-              <div className="pie-chart-wrapper" style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
-                <div style={{ flex: 1 }}>
-                  <ResponsiveContainer width="100%" height={260}>
-                    <PieChart>
-                      <Pie data={categoryData} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={5} dataKey="value">
-                        {categoryData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
-                      </Pie>
-                      <Tooltip formatter={(v) => `${v}%`} />
-                    </PieChart>
-                  </ResponsiveContainer>
+              {categoryData.length === 0 ? (
+                <div className="chart-empty-state">
+                  <Inbox size={48} />
+                  <p>Belum ada data kategori untuk periode ini</p>
                 </div>
-                <div className="pie-legend" style={{ flex: 1 }}>
-                  {categoryData.map((item, idx) => (
-                    <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
-                      <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: item.color }}></div>
-                      <span style={{ fontSize: '0.9rem', color: '#1e293b', fontWeight: '500' }}>{item.name}</span>
-                      <span style={{ fontSize: '0.85rem', color: '#64748b', marginLeft: 'auto' }}>{item.value}%</span>
-                    </div>
-                  ))}
+              ) : (
+                <div className="pie-chart-wrapper">
+                  <div className="pie-container">
+                    <ResponsiveContainer width="100%" height={260}>
+                      <PieChart>
+                        <Pie data={categoryData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={4} dataKey="value">
+                          {categoryData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
+                        </Pie>
+                        <Tooltip
+                          formatter={(v, name) => [`${v}%`, name]}
+                          contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)'}}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="pie-legend">
+                    {categoryData.map((item, idx) => (
+                      <div key={idx} className="legend-item">
+                        <span className="legend-dot" style={{ backgroundColor: item.color }}></span>
+                        <span className="legend-name">{item.name}</span>
+                        <span className="legend-value">{item.value}%</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </section>
 

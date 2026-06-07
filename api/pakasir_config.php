@@ -2,16 +2,21 @@
 /**
  * Pakasir.com Configuration
  * Documentation: https://pakasir.com/p/docs
+ * 
+ * Untuk hosting, set environment variable:
+ *   PAKASIR_API_KEY   — API key dari dashboard Pakasir
+ *   PAKASIR_PROJECT   — slug project dari dashboard Pakasir
+ *   WEBHOOK_URL       — URL webhook (URL hosting anda + ?action=webhook)
  */
 
-// Pakasir API Configuration
-define('PAKASIR_API_KEY', 'j6Md3oJGJm4CP16fVL2rWFv3ZroEI7ta');
-define('PAKASIR_PROJECT', 'i-dont-know'); // Slug project dari dashboard Pakasir
-define('PAKASIR_BASE_URL', 'https://app.pakasir.com');
-define('PAKASIR_API_URL', 'https://app.pakasir.com/api');
+// Pakasir API Configuration — baca dari environment variable
+define('PAKASIR_API_KEY', getenv('PAKASIR_API_KEY') ?: 'j6Md3oJGJm4CP16fVL2rWFv3ZroEI7ta');
+define('PAKASIR_PROJECT', getenv('PAKASIR_PROJECT') ?: 'i-dont-know');
+define('PAKASIR_BASE_URL', getenv('PAKASIR_BASE_URL') ?: 'https://app.pakasir.com');
+define('PAKASIR_API_URL', getenv('PAKASIR_API_URL') ?: 'https://app.pakasir.com/api');
 
-// Webhook URL (sesuaikan dengan yang ada di dashboard Pakasir)
-define('WEBHOOK_URL', 'https://surrogate-rascal-idealness.ngrok-free.dev/testtt/api/index.php?action=webhook');
+// Webhook URL — set sesuai environment
+define('WEBHOOK_URL', getenv('WEBHOOK_URL') ?: '');
 
 /**
  * Create transaction at Pakasir.com

@@ -1,4 +1,5 @@
-const API_URL = 'http://testtt.test/api/index.php';
+// Use Vite proxy in dev, environment variable for production
+const API_URL = import.meta.env.VITE_API_URL || '/api/index.php';
 
 async function fetchAPI(action, data = null, method = 'POST') {
   const options = {
@@ -30,11 +31,21 @@ export const api = {
   getProduct: (id) => fetchAPI('get_product', null, 'GET'),
   addProduct: (data) => fetchAPI('add_product', data),
   updateProduct: (data) => fetchAPI('update_product', data),
-  deleteProduct: (id) => {
-    return fetch(`${API_URL}?action=delete_product&id=${id}`, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' }
-    }).then(res => res.json()).catch(err => ({ success: false, error: err.message }));
+  deleteProduct: async (id) => {
+    try {
+      const res = await fetch(`${API_URL}?action=delete_product&id=${encodeURIComponent(id)}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const text = await res.text();
+      try {
+        return JSON.parse(text);
+      } catch (e) {
+        return { success: false, error: 'Server (HTTP ' + res.status + '): ' + text.substring(0, 300) };
+      }
+    } catch (err) {
+      return { success: false, error: 'Network error: ' + err.message };
+    }
   },
   
   getCustomers: () => fetchAPI('get_customers'),
@@ -109,7 +120,7 @@ export const api = {
   saveContract: (data) => fetchAPI('save_contract', data),
   
   createPayment: (data) => {
-    return fetch('http://testtt.test/api/index.php?action=create_payment', {
+    return fetch(`${API_URL}?action=create_payment`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -140,87 +151,41 @@ export const api = {
     }).then(res => res.json()).catch(err => ({ success: false, error: err.message }));
   },
   
+  // User management
+  getUsers: () => fetchAPI('get_users'),
+  getUser: (id) => fetchAPI('get_user', null, 'GET'),
+  addUser: (data) => fetchAPI('add_user', data),
+  updateUser: (data) => fetchAPI('update_user', data),
+  deleteUser: (id) => {
+    return fetch(`${API_URL}?action=delete_user&id=${encodeURIComponent(id)}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    }).then(res => res.json());
+  },
+  
   getPaymentMethods: () => {
     return fetch(`${API_URL}?action=get_payment_methods`, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' }
     }).then(res => res.json()).catch(err => ({ success: false, error: err.message }));
   },
-  
-  analyzeMoney: async (imageBase64) => {
-    const OPENROUTER_API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY || '';
-    
-    if (!OPENROUTER_API_KEY) {
-      return { success: false, error: 'API key tidak ditemukan. Set VITE_OPENROUTER_API_KEY di file .env' };
-    }
-    
-    try {
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-          'HTTP-Referer': window.location.origin,
-          'X-Title': 'Money Analyzer'
-        },
-        body: JSON.stringify({
-          model: 'google/gemma-4-26b-a4b-it:free',
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: `Analisis gambar uang ini dan tentukan apakah uang tersebut ASLI atau PALSU. 
-                  
-Berikan analisis dalam format JSON dengan struktur berikut:
-{
-  "status": "ASLI" atau "PALSU" atau "TIDAK DAPAT DITENTUKAN",
-  "nominal": "nominal uang (contoh: Rp 100.000)",
-  "kepercayaan": persentase kepercayaan dalam angka (0-100),
-  "ciri_ciri": {
-    "positif": ["ciri-ciri yang menunjukkan uang asli"],
-    "negatif": ["ciri-ciri yang menunjukkan uang palsu"]
+
+  // Notifications
+  getNotifications: (role = '') => {
+    const url = role 
+      ? `${API_URL}?action=get_notifications&role=${encodeURIComponent(role)}`
+      : `${API_URL}?action=get_notifications`;
+    return fetch(url, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    }).then(res => res.json()).catch(err => ({ success: false, error: err.message }));
   },
-  "rekomendasi": "rekomendasi tindakan"
-}
 
-Jawab HANYA dengan JSON tersebut, tanpa penjelasan tambahan.`
-                },
-                {
-                  type: 'image_url',
-                  image_url: {
-                    url: imageBase64.startsWith('data:') ? imageBase64 : `data:image/jpeg;base64,${imageBase64}`
-                  }
-                }
-              ]
-            }
-          ],
-          max_tokens: 1024
-        })
-      });
+  markNotificationRead: (id) => fetchAPI('mark_notification_read', { id }),
 
-      const result = await response.json();
-      
-      if (result.choices && result.choices[0]) {
-        const content = result.choices[0].message.content;
-        try {
-          const jsonMatch = content.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            return { success: true, analysis: JSON.parse(jsonMatch[0]), raw: content };
-          }
-          return { success: true, analysis: null, raw: content };
-        } catch (parseError) {
-          return { success: true, analysis: null, raw: content };
-        }
-      }
-      
-      return { success: false, error: 'No response from AI' };
-    } catch (error) {
-      console.error('Money Analysis Error:', error);
-      return { success: false, error: error.message };
-    }
-  }
+  markAllNotificationsRead: (role = '') => fetchAPI('mark_all_notifications_read', { role }),
+
+  addNotification: (data) => fetchAPI('add_notification', data),
 };
 
 export default api;

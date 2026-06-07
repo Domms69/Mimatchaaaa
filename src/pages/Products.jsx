@@ -1,32 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Search, Plus, Download, Grid, List, ChevronDown, 
-  MoreVertical, Edit3, Trash2, Filter, ChevronLeft, ChevronRight,
-  Coffee, Leaf, Gem, Settings, Shirt, Gift, Box, X, AlertCircle
+  Search, Plus, Download, Grid, List, 
+  Edit3, Trash2, ChevronLeft, ChevronRight,
+  X, Loader, AlertCircle
 } from 'lucide-react';
 import api from '../api/service';
-
-const initialCategories = [
-  { name: 'All Categories', icon: <Box size={18}/> },
-  { name: 'Beverages', icon: <Coffee size={18}/> },
-  { name: 'Matcha', icon: <Leaf size={18}/> },
-  { name: 'Accessories', icon: <Gem size={18}/> },
-  { name: 'Equipment', icon: <Settings size={18}/> },
-  { name: 'Merchandise', icon: <Shirt size={18}/> },
-  { name: 'Gift Sets', icon: <Gift size={18}/> },
-];
 
 const Products = () => {
   const [viewMode, setViewMode] = useState('grid');
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All Categories');
-  const [statusFilter, setStatusFilter] = useState('All Status');
-  const [stockFilter, setStockFilter] = useState('All Stock');
+
   const [sortBy, setSortBy] = useState('Newest');
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 8;
+  const itemsPerPage = 12;
 
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
@@ -35,6 +23,32 @@ const Products = () => {
 
   useEffect(() => {
     fetchProducts();
+
+    // Re-fetch when POS or other pages add/edit/delete products
+    const handleProductsUpdated = () => {
+      fetchProducts();
+    };
+    window.addEventListener('productsUpdated', handleProductsUpdated);
+
+    // Re-fetch when tab becomes visible (e.g. switching back from POS tab)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchProducts();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Re-fetch on window focus (switching between browser tabs)
+    const handleWindowFocus = () => {
+      fetchProducts();
+    };
+    window.addEventListener('focus', handleWindowFocus);
+
+    return () => {
+      window.removeEventListener('productsUpdated', handleProductsUpdated);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
+    };
   }, []);
 
   const fetchProducts = async () => {
@@ -75,31 +89,26 @@ const Products = () => {
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this product?')) {
-      try {
-        await api.deleteProduct(id);
-        setProducts(products.filter(p => p.id_produk !== id));
-        // Notify other pages (POS, etc.) that products changed
+    if (!window.confirm('Yakin ingin menghapus produk ini? Tindakan ini tidak dapat dibatalkan.')) return;
+
+    try {
+      const result = await api.deleteProduct(id);
+      if (result && result.success === true) {
+        setProducts(prev => prev.filter(p => p.id_produk !== id));
         window.dispatchEvent(new CustomEvent('productsUpdated'));
         localStorage.setItem('products_last_updated', Date.now().toString());
-      } catch (error) {
-        console.error('Error deleting product:', error);
-        alert('Failed to delete product');
+      } else {
+        alert('Gagal menghapus produk: ' + (result?.error || 'Terjadi kesalahan pada server. Silakan coba lagi.'));
       }
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      alert('Gagal menghapus produk. Silakan coba lagi.');
     }
   };
 
   const filteredProducts = products
     .filter(p => {
-      const matchesSearch = p.nama_produk.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesCategory = selectedCategory === 'All Categories' || p.kategori === selectedCategory;
-      
-      let matchesStock = true;
-      if (stockFilter === 'In Stock') matchesStock = p.stok > 10;
-      if (stockFilter === 'Low Stock') matchesStock = p.stok > 0 && p.stok <= 10;
-      if (stockFilter === 'Out of Stock') matchesStock = p.stok === 0;
-
-      return matchesSearch && matchesCategory && matchesStock;
+      return p.nama_produk.toLowerCase().includes(searchTerm.toLowerCase());
     })
     .sort((a, b) => {
       if (sortBy === 'Price: Low to High') return a.harga - b.harga;
@@ -111,11 +120,6 @@ const Products = () => {
   const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
   const currentProducts = filteredProducts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
-  const getCategoryCount = (catName) => {
-    if (catName === 'All Categories') return products.length;
-    return products.filter(p => p.kategori === catName).length;
-  };
-
   const notifyProductsUpdated = () => {
     // Dispatch custom event so POS and other pages can react immediately
     window.dispatchEvent(new CustomEvent('productsUpdated'));
@@ -123,8 +127,38 @@ const Products = () => {
     localStorage.setItem('products_last_updated', Date.now().toString());
   };
 
+  // Compress image before sending to API
+  const compressImage = (base64, maxWidth = 800, quality = 0.7) => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxWidth) {
+          height = (maxWidth / width) * height;
+          width = maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = base64;
+    });
+  };
+
   const handleSaveProduct = async (formData) => {
     try {
+      // Compress image if present
+      let gambar = formData.image || '';
+      if (gambar && gambar.startsWith('data:image')) {
+        gambar = await compressImage(gambar);
+      }
+
       if (showEditModal) {
         const result = await api.updateProduct({
           id: currentProduct.id_produk,
@@ -133,14 +167,14 @@ const Products = () => {
           stok: parseInt(formData.stok) || 0,
           kategori: formData.kategori,
           deskripsi: formData.deskripsi || '',
-          gambar: formData.image || ''
+          gambar: gambar
         });
         if (result.success) {
           fetchProducts();
           notifyProductsUpdated();
           setShowEditModal(false);
         } else {
-          alert('Gagal update produk: ' + (result.error || 'Unknown error'));
+          alert('Gagal update produk: ' + (result.error || 'Terjadi kesalahan pada server.'));
         }
       } else {
         const result = await api.addProduct({
@@ -149,19 +183,19 @@ const Products = () => {
           stok: parseInt(formData.stok) || 0,
           kategori: formData.kategori,
           deskripsi: formData.deskripsi || '',
-          gambar: formData.image || ''
+          gambar: gambar
         });
         if (result.success) {
           fetchProducts();
           notifyProductsUpdated();
           setShowAddModal(false);
         } else {
-          alert('Gagal menambah produk: ' + (result.error || 'Unknown error'));
+          alert('Gagal menambah produk: ' + (result.error || 'Terjadi kesalahan pada server.'));
         }
       }
     } catch (error) {
       console.error('Error saving product:', error);
-      alert('Failed to save product: ' + error.message);
+      alert('Gagal menyimpan produk: ' + error.message);
     }
   };
 
@@ -195,22 +229,6 @@ const Products = () => {
           </div>
           <div className="dropdown-filters">
             <div className="filter-select-wrapper" style={{ position: 'relative' }}>
-              <select className="filter-select-native" value={selectedCategory} onChange={(e) => { setSelectedCategory(e.target.value); setCurrentPage(1); }}>
-                <option>All Categories</option>
-                {initialCategories.slice(1).map(c => <option key={c.name}>{c.name}</option>)}
-              </select>
-            </div>
-            
-            <div className="filter-select-wrapper" style={{ position: 'relative' }}>
-              <select className="filter-select-native" value={stockFilter} onChange={(e) => { setStockFilter(e.target.value); setCurrentPage(1); }}>
-                <option>All Stock</option>
-                <option>In Stock</option>
-                <option>Low Stock</option>
-                <option>Out of Stock</option>
-              </select>
-            </div>
-
-            <div className="filter-select-wrapper" style={{ position: 'relative' }}>
               <select className="filter-select-native" value={sortBy} onChange={(e) => { setSortBy(e.target.value); setCurrentPage(1); }}>
                 <option>Newest</option>
                 <option>Name (A-Z)</option>
@@ -231,28 +249,6 @@ const Products = () => {
       </div>
 
       <section className="products-content">
-        <aside className="category-sidebar">
-          <div className="category-header">
-            <h3>Categories</h3>
-            <button className="add-category" onClick={() => alert('Add Category Modal')}><Plus size={14} /> Add</button>
-          </div>
-          <ul className="category-list">
-            {initialCategories.map((cat, idx) => (
-              <li 
-                key={idx} 
-                className={selectedCategory === cat.name ? 'active' : ''}
-                onClick={() => { setSelectedCategory(cat.name); setCurrentPage(1); }}
-              >
-                <span className="cat-icon-text">
-                  {cat.icon}
-                  {cat.name}
-                </span>
-                <span className="cat-count">{getCategoryCount(cat.name)}</span>
-              </li>
-            ))}
-          </ul>
-        </aside>
-
         <div className="products-grid-container">
           {loading ? (
             <div style={{ padding: '3rem', textAlign: 'center' }}>Loading products...</div>
@@ -303,23 +299,69 @@ const Products = () => {
 };
 
 const ProductModal = ({ product, onClose, onSave }) => {
-  const [formData, setFormData] = useState(product || {
+  const [formData, setFormData] = useState(product ? {
+    nama_produk: product.nama_produk || '',
+    kategori: product.kategori || '',
+    harga: product.harga || '',
+    stok: product.stok || '',
+    image: product.gambar || null,
+    deskripsi: product.deskripsi || ''
+  } : {
     nama_produk: '',
-    kategori: 'Beverages',
+    kategori: '',
     harga: '',
     stok: '',
-    image: null
+    image: null,
+    deskripsi: ''
   });
-  const fileInputRef = React.useRef(null);
+  const [errors, setErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const fileInputRef = useRef(null);
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (readerEvent) => {
-        setFormData({ ...formData, image: readerEvent.target.result });
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      setErrorMessage('Ukuran gambar maksimal 5MB');
+      return;
+    }
+
+    setErrorMessage('');
+    const reader = new FileReader();
+    reader.onload = (readerEvent) => {
+      setFormData({ ...formData, image: readerEvent.target.result });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const validate = () => {
+    const newErrors = {};
+    if (!formData.nama_produk.trim()) {
+      newErrors.nama_produk = 'Nama produk wajib diisi';
+    }
+    if (!formData.harga || parseInt(formData.harga) <= 0) {
+      newErrors.harga = 'Harga harus diisi dan lebih dari 0';
+    }
+    if (formData.stok === '' || parseInt(formData.stok) < 0) {
+      newErrors.stok = 'Stok harus diisi';
+    }
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSave = async () => {
+    if (!validate()) return;
+    setSaving(true);
+    setErrorMessage('');
+    try {
+      await onSave(formData);
+    } catch (err) {
+      setErrorMessage(err.message || 'Gagal menyimpan produk');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -328,10 +370,16 @@ const ProductModal = ({ product, onClose, onSave }) => {
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{product ? 'Edit Product' : 'Add New Product'}</h3>
-          <button className="close-btn" onClick={onClose}><X size={20}/></button>
+          <button className="close-btn" onClick={onClose} disabled={saving}><X size={20}/></button>
         </div>
         <div className="modal-body">
-          <div className="image-upload-section" onClick={() => fileInputRef.current.click()}>
+          {errorMessage && (
+            <div style={{ padding: '0.75rem', marginBottom: '1rem', background: '#fef2f2', border: '1px solid #fee2e2', borderRadius: '10px', color: '#dc2626', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <AlertCircle size={16} /> {errorMessage}
+            </div>
+          )}
+
+          <div className="image-upload-section" onClick={() => !saving && fileInputRef.current.click()}>
             {formData.image ? (
               <img src={formData.image} alt="Preview" className="img-preview" />
             ) : (
@@ -350,51 +398,48 @@ const ProductModal = ({ product, onClose, onSave }) => {
           </div>
 
           <div className="form-group">
-            <label>Product Name</label>
+            <label>Product Name <span style={{color: '#dc2626'}}>*</span></label>
             <input 
               type="text" 
-              className="input-field" 
+              className={`input-field ${errors.nama_produk ? 'input-error' : ''}`} 
               value={formData.nama_produk} 
-              onChange={(e) => setFormData({...formData, nama_produk: e.target.value})}
+              onChange={(e) => { setFormData({...formData, nama_produk: e.target.value}); setErrors({...errors, nama_produk: ''}); }}
               placeholder="e.g. Matcha Latte"
+              disabled={saving}
             />
-          </div>
-          <div className="form-row" style={{ display: 'flex', gap: '1rem' }}>
-            <div className="form-group" style={{ flex: 1 }}>
-              <label>Category</label>
-              <select 
-                className="input-field" 
-                value={formData.kategori}
-                onChange={(e) => setFormData({...formData, kategori: e.target.value})}
-              >
-                {initialCategories.slice(1).map(c => <option key={c.name}>{c.name}</option>)}
-              </select>
-            </div>
-            <div className="form-group" style={{ flex: 1 }}>
-              <label>Price (Rp)</label>
-              <input 
-                type="number" 
-                className="input-field" 
-                value={formData.harga}
-                onChange={(e) => setFormData({...formData, harga: e.target.value})}
-                placeholder="25000"
-              />
-            </div>
+            {errors.nama_produk && <span style={{color: '#dc2626', fontSize: '0.75rem', marginTop: '0.25rem', display: 'block'}}>{errors.nama_produk}</span>}
           </div>
           <div className="form-group">
-            <label>Initial Stock</label>
+              <label>Price (Rp) <span style={{color: '#dc2626'}}>*</span></label>
+              <input 
+                type="number" 
+                className={`input-field ${errors.harga ? 'input-error' : ''}`} 
+                value={formData.harga}
+                onChange={(e) => { setFormData({...formData, harga: e.target.value}); setErrors({...errors, harga: ''}); }}
+                placeholder="25000"
+                disabled={saving}
+              />
+              {errors.harga && <span style={{color: '#dc2626', fontSize: '0.75rem', marginTop: '0.25rem', display: 'block'}}>{errors.harga}</span>}
+            </div>
+
+          <div className="form-group">
+            <label>Initial Stock <span style={{color: '#dc2626'}}>*</span></label>
             <input 
               type="number" 
-              className="input-field" 
+              className={`input-field ${errors.stok ? 'input-error' : ''}`} 
               value={formData.stok}
-              onChange={(e) => setFormData({...formData, stok: e.target.value})}
+              onChange={(e) => { setFormData({...formData, stok: e.target.value}); setErrors({...errors, stok: ''}); }}
               placeholder="50"
+              disabled={saving}
             />
+            {errors.stok && <span style={{color: '#dc2626', fontSize: '0.75rem', marginTop: '0.25rem', display: 'block'}}>{errors.stok}</span>}
           </div>
         </div>
         <div className="modal-footer">
-          <button className="cancel-btn" onClick={onClose}>Cancel</button>
-          <button className="save-btn" onClick={() => onSave(formData)}>Save Product</button>
+          <button className="cancel-btn" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="save-btn" onClick={handleSave} disabled={saving}>
+            {saving ? <><Loader size={16} style={{animation: 'spin 1s linear infinite'}} /> Saving...</> : 'Save Product'}
+          </button>
         </div>
       </div>
     </div>
