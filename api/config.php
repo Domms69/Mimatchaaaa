@@ -60,8 +60,9 @@ $port = '5432';
 $user = 'postgres';
 $pass = '';
 $dbname = 'mimatcha_db';
+$sslmode = 'prefer'; // default: no SSL
 
-// Priority: DATABASE_URL (Railway) > DB_HOST/DB_PORT/... > local defaults
+// Priority: DATABASE_URL (Railway/Supabase) > DB_HOST/DB_PORT/... > local defaults
 $databaseUrl = getenv('DATABASE_URL');
 if ($databaseUrl) {
     // Parse DATABASE_URL: postgresql://user:password@host:port/database?sslmode=require
@@ -71,12 +72,20 @@ if ($databaseUrl) {
     $user = $parts['user'] ?? $user;
     $pass = $parts['pass'] ?? $pass;
     $dbname = ltrim($parts['path'] ?? '', '/') ?: $dbname;
+    // Extract SSL mode from query string (required for Supabase)
+    if (isset($parts['query'])) {
+        parse_str($parts['query'], $queryParams);
+        if (isset($queryParams['sslmode'])) {
+            $sslmode = $queryParams['sslmode'];
+        }
+    }
 } else {
     $host = getenv('DB_HOST') ?: $host;
     $port = getenv('DB_PORT') ?: $port;
     $user = getenv('DB_USER') ?: $user;
     $pass = getenv('DB_PASS') ?: $pass;
     $dbname = getenv('DB_NAME') ?: $dbname;
+    $sslmode = getenv('DB_SSLMODE') ?: $sslmode;
 }
 
 // OpenRouter API Key
@@ -85,7 +94,7 @@ if (!defined('OPENROUTER_API_KEY')) {
 }
 
 try {
-    $conn = new PDO("pgsql:host=$host;port=$port;dbname=$dbname", $user, $pass, [
+    $conn = new PDO("pgsql:host=$host;port=$port;dbname=$dbname;sslmode=$sslmode", $user, $pass, [
         PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES   => false,
