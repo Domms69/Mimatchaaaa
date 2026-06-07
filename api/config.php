@@ -121,6 +121,20 @@ if (!$tables_exist) {
             error_log("MiMatcha DB Init Warning: " . $e->getMessage());
         }
     }
+    
+    // Seed data only if this is a fresh database (produk table is empty)
+    $has_data = $conn->query("SELECT COUNT(*) FROM produk")->fetchColumn();
+    if (!$has_data || $has_data == 0) {
+        $seed_path = dirname(__DIR__) . '/database/seed.sql';
+        if (file_exists($seed_path)) {
+            $seed_sql = file_get_contents($seed_path);
+            try {
+                $conn->exec($seed_sql);
+            } catch (PDOException $e) {
+                error_log("MiMatcha Seed Warning: " . $e->getMessage());
+            }
+        }
+    }
 }
 
 function getAllProducts() {
