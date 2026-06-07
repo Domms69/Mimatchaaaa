@@ -1,8 +1,15 @@
-[phases]
-setup = [
+[phases.install]
+cmds = [
+  "npm ci --production=false",
+  "composer install --no-interaction --prefer-dist --optimize-autoloader"
+]
+
+[phases.build]
+cmds = [
+  "npm run build",
   "mkdir -p public/dist",
-  "cp -r dist/* public/dist/ 2>/dev/null || true"
+  "cp -r dist/* public/dist/"
 ]
 
 [start]
-cmd = "php -S 0.0.0.0:\ -t public"
+cmd = "php -S 0.0.0.0:${PORT} -t public"
