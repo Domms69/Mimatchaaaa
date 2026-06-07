@@ -1,6 +1,9 @@
+[environment]
+NODE_VERSION = "20"
+
 [phases.install]
 cmds = [
-  "npm ci --production=false",
+  "npm install --include=dev",
   "composer install --no-interaction --prefer-dist --optimize-autoloader"
 ]
 
